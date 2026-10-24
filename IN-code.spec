@@ -30,6 +30,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="IN-code",
+    icon=str(ROOT / "assets" / "app.ico"),
     console=False,
     disable_windowed_traceback=False,
 )

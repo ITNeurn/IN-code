@@ -53,6 +53,10 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("IN-code")
     win = MainWindow()
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "app.ico")
+    if os.path.exists(icon_path):
+        from PyQt6.QtGui import QIcon
+        app.setWindowIcon(QIcon(icon_path))
     win.show()
 
     # 自测模式（排查打包版运行崩溃）：--selftest-run
