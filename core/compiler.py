@@ -1,0 +1,188 @@
+# -*- coding: utf-8 -*-
+"""
+隔离编译 / 运行环境模块
+=======================
+原则：软件内置隔离运行环境，不污染用户系统环境。
+  - Python：在用户数据目录下创建独立 venv（~/.incode/runtime/venv），
+            所有第三方库都安装进该 venv。
+  - C / C++：优先使用 runtime/toolchain 目录下的内置 gcc/g++；
+             找不到时回退到系统 PATH 中的编译器，并给出提示。
+
+运行时代码行高亮：
+  - Python：通过 sys.settrace 钩子逐行执行，向标准错误输出行标记 @@CC_LINE:n，
+            界面解析标记后高亮当前执行行。
+  - C / C++：暂不支持逐行高亮（需要调试器支持），仅展示编译与运行输出。
+"""
+import os
+import shutil
+import subprocess
+import sys
+import sysconfig
+import venv
+from pathlib import Path
+
+from PyQt6.QtCore import QThread, pyqtSignal
+
+from config.settings import VENV_DIR, RUNTIME_DIR
+
+LINE_MARK = "@@CC_LINE:"      # 行高亮标记前缀
+BUILD_DIR = RUNTIME_DIR / "build"          # C/C++ 编译输出目录
+SRC_DIR = RUNTIME_DIR / "src"              # 临时代码存放目录
+
+
+# ---------------------------------------------------------------- 环境探测
+def venv_python() -> Path:
+    """返回隔离 venv 中的 python 解释器路径；不存在则先创建 venv。"""
+    py = VENV_DIR / "Scripts" / "python.exe"
+    if not py.exists():
+        VENV_DIR.parent.mkdir(parents=True, exist_ok=True)
+        # 打包（PyInstaller）状态下 sys.executable 是软件自身 exe，
+        # 必须找系统 Python 来建 venv；找不到则报错提示
+        builder_python = sys.executable
+        if getattr(sys, "frozen", False):
+            builder_python = shutil.which("python") or ""
+            if not builder_python:
+                raise RuntimeError("未检测到本机 Python，无法创建隔离运行环境")
+            subprocess.run([builder_python, "-m", "venv", str(VENV_DIR)],
+                           check=True, capture_output=True)
+        else:
+            venv.EnvBuilder(with_pip=True).create(VENV_DIR)
+    return py
+
+
+def venv_pip() -> list[str]:
+    """返回调用 venv 内 pip 的命令前缀。"""
+    return [str(venv_python()), "-m", "pip"]
+
+
+def find_c_compiler(lang: str) -> str | None:
+    """查找 C/C++ 编译器：先找内置 toolchain，再找系统 PATH。"""
+    name = "gcc" if lang == "c" else "g++"
+    builtin = RUNTIME_DIR / "toolchain" / "bin" / f"{name}.exe"
+    if builtin.exists():
+        return str(builtin)
+    return shutil.which(name)   # 系统 PATH（可能为 None）
+
+
+def environment_status() -> dict:
+    """供界面显示环境状态。"""
+    return {
+        "venv_ready": (VENV_DIR / "Scripts" / "python.exe").exists(),
+        "gcc": find_c_compiler("c"),
+        "g++": find_c_compiler("cpp"),
+    }
+
+
+# ---------------------------------------------------------------- Python 行追踪脚本
+_TRACE_RUNNER = r'''
+import sys, runpy
+
+target = sys.argv[1]
+MARK = "@@CC_LINE:"
+
+def tracer(frame, event, arg):
+    # 只追踪目标文件本身的行事件，忽略库代码
+    if event == "line" and frame.f_code.co_filename == target:
+        sys.stderr.write(MARK + str(frame.f_lineno) + "\n")
+        sys.stderr.flush()
+    return tracer if frame.f_code.co_filename == target else None
+
+sys.settrace(tracer)
+try:
+    runpy.run_path(target, run_name="__main__")
+finally:
+    sys.settrace(None)
+'''
+
+
+# ---------------------------------------------------------------- 运行工作线程
+class RunWorker(QThread):
+    """在后台线程中编译并运行用户代码。
+
+    信号：
+      output(str)      程序标准输出 / 错误文本（已剔除行标记）
+      line_changed(int)当前执行到的代码行号（仅 Python）
+      done(int)        进程结束，参数为退出码（注意不能命名为 finished，会与 QThread 内置信号冲突导致窗口程序崩溃退出）
+      failed(str)      环境错误（如无编译器），无法启动运行
+    """
+    output = pyqtSignal(str)
+    line_changed = pyqtSignal(int)
+    done = pyqtSignal(int)
+    failed = pyqtSignal(str)
+
+    def __init__(self, code: str, language: str, parent=None):
+        super().__init__(parent)
+        self.code = code
+        self.language = language
+        self._proc: subprocess.Popen | None = None
+
+    # ------------------------------------------------------------ 主流程
+    def run(self):
+        try:
+            SRC_DIR.mkdir(parents=True, exist_ok=True)
+            BUILD_DIR.mkdir(parents=True, exist_ok=True)
+            if self.language == "python":
+                self._run_python()
+            else:
+                self._run_c()
+        except PermissionError:
+            self.failed.emit("没有写入权限，无法创建运行目录")
+        except Exception as e:
+            self.failed.emit(str(e))
+
+    # ------------------------------------------------------------ Python
+    def _run_python(self):
+        src = SRC_DIR / "main.py"
+        src.write_text(self.code, encoding="utf-8")
+        runner = SRC_DIR / "_runner.py"
+        runner.write_text(_TRACE_RUNNER, encoding="utf-8")
+        cmd = [str(venv_python()), "-u", str(runner), str(src)]
+        self._spawn(cmd, parse_lines=True)
+
+    # ------------------------------------------------------------ C / C++
+    def _run_c(self):
+        compiler = find_c_compiler(self.language)
+        if not compiler:
+            self.failed.emit(
+                f"未找到 {('gcc' if self.language == 'c' else 'g++')} 编译器，"
+                "请安装内置工具链或配置系统编译器")
+            return
+        ext = ".c" if self.language == "c" else ".cpp"
+        src = SRC_DIR / f"main{ext}"
+        src.write_text(self.code, encoding="utf-8")
+        exe = BUILD_DIR / "main.exe"
+        # 先编译
+        proc = subprocess.run([compiler, str(src), "-o", str(exe), "-g"],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if proc.returncode != 0:
+            self.output.emit("编译失败：\n" + proc.stderr)
+            self.done.emit(proc.returncode)
+            return
+        self.output.emit("编译成功，开始运行……\n")
+        self._spawn([str(exe)], parse_lines=False)
+
+    # ------------------------------------------------------------ 子进程管理
+    def _spawn(self, cmd: list[str], parse_lines: bool):
+        """启动子进程并实时转发输出；Python 模式下解析行标记。"""
+        self._proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+            cwd=str(SRC_DIR),
+        )
+        assert self._proc.stdout is not None
+        for raw in self._proc.stdout:
+            if parse_lines and raw.startswith(LINE_MARK):
+                try:
+                    self.line_changed.emit(int(raw[len(LINE_MARK):].strip()))
+                except ValueError:
+                    pass
+            else:
+                self.output.emit(raw)
+        code = self._proc.wait()
+        self.line_changed.emit(-1)   # 取消高亮
+        self.done.emit(code)
+
+    def stop(self):
+        """终止正在运行的程序。"""
+        if self._proc and self._proc.poll() is None:
+            self._proc.kill()
