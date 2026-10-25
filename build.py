@@ -13,6 +13,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist" / "IN-code"
 
+sys.path.insert(0, str(ROOT))
+from config.settings import APP_VERSION  # noqa: E402
+
 
 def build_app():
     """PyInstaller 目录模式打包。"""
@@ -44,14 +47,21 @@ def build_sfx():
     """7z 自解压单文件安装包（替代方案，无需 Inno Setup）。"""
     seven_zip = r"C:\Program Files\7-Zip\7z.exe"
     sfx_module = r"C:\Program Files\7-Zip\7z.sfx"
-    archive = DIST.parent / "IN-code-1.0.7z"
-    out = DIST.parent / "IN-code-1.0-sfx.exe"
+    archive = DIST.parent / f"IN-code-{APP_VERSION}.7z"
+    out = DIST.parent / f"IN-code-{APP_VERSION}-sfx.exe"
     subprocess.run([seven_zip, "a", "-t7z", "-mx=1", "-mmt=on",
                     str(archive), "IN-code"], cwd=DIST.parent, check=True)
+
+    # SFX 配置模板里的 {version} 替换为当前版本号
+    cfg_text = (ROOT / "sfx_config.txt").read_text(encoding="utf-8")
+    tmp_cfg = DIST.parent / "_sfx_config_runtime.txt"
+    tmp_cfg.write_text(cfg_text.replace("{version}", APP_VERSION), encoding="utf-8")
+
     with open(out, "wb") as w:
-        for f in (sfx_module, ROOT / "sfx_config.txt", archive):
+        for f in (sfx_module, tmp_cfg, archive):
             with open(f, "rb") as r:
                 shutil.copyfileobj(r, w, 1 << 20)
+    tmp_cfg.unlink(missing_ok=True)
     print("[sfx] 自解压安装包 ->", out)
 
 

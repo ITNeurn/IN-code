@@ -21,7 +21,9 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QMessageBox, QWidget)
 
 from config.settings import ASSETS_DIR
-from core.super_mode import SuperModeManager, SuperDownloadWorker
+from core.super_mode import (SuperModeManager, SuperDownloadWorker,
+                             total_package_count, default_super_lib_dir)
+from .status_dialogs import SuperDownloadDialog
 
 # 尝试加载视频组件（PyQt6-Multimedia 不可用时优雅降级为静态文字）
 try:
@@ -235,6 +237,7 @@ class SuperModeWizard:
         self.parent = parent
         self.manager = SuperModeManager(settings)
         self.worker: SuperDownloadWorker | None = None
+        self.download_dialog: SuperDownloadDialog | None = None
 
     def run(self) -> bool:
         """执行完整激活流程。返回是否完成激活（取消返回 False）。"""
@@ -244,9 +247,8 @@ class SuperModeWizard:
             if cls(p).exec() != QDialog.DialogCode.Accepted:
                 return False
 
-        # 4：库安装目录
-        default_dir = str(Path.home() / ".incode" / "super_libs")
-        dlg_dir = LibDirDialog(p, default_dir)
+        # 4：库安装目录（默认自动选非 C 盘剩余空间最大的磁盘）
+        dlg_dir = LibDirDialog(p, default_super_lib_dir())
         if dlg_dir.exec() != QDialog.DialogCode.Accepted:
             return False
         lib_dir = dlg_dir.selected_dir()
@@ -273,10 +275,19 @@ class SuperModeWizard:
         # 进入准备动画
         IntroVideoDialog(p).exec()
 
-        # 写入状态并启动后台下载（不阻塞界面）
+        # 写入状态并启动后台下载
         self.manager.activate(lib_dir, want_moe)
         self.worker = SuperDownloadWorker(self.settings, p)
+
+        # 下载进度页：实时显示已下载数 / 总数、当前库名、MoE 百分比
+        self.download_dialog = SuperDownloadDialog(
+            total_package_count(), with_moe=want_moe, parent=p)
+        self.worker.progress.connect(self.download_dialog.set_progress)
+        self.worker.log.connect(self.download_dialog.append_log)
+        self.worker.moe_progress.connect(self.download_dialog.set_moe)
+        self.worker.finished_all.connect(self.download_dialog.on_finished)
         self.worker.start()
+        self.download_dialog.exec()      # 可点【转到后台运行】提前关闭，下载继续
 
         # 6：配置完成页
         FinishDialog(p).exec()

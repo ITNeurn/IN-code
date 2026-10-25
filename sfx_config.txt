@@ -1,6 +1,6 @@
 ;!@Install@!UTF-8!
-Title="IN-code 1.0"
-BeginPrompt="即将安装 IN-code 1.0（内含 DeepSeek R1 7B 本地模型，约需 5GB 磁盘空间）"
+Title="IN-code {version}"
+BeginPrompt="即将安装 IN-code {version}（内含 DeepSeek R1 7B 本地模型，约需 5GB 磁盘空间）"
 ExtractTitle="正在解压 IN-code..."
 ExtractDialogText="正在解压程序文件与内置模型，请稍候……"
 ExtractCancelText="取消安装"

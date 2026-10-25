@@ -2,7 +2,7 @@
 ; 先运行 python build.py 生成 dist\IN-code，再执行本脚本
 
 #define APP_NAME "IN-code"
-#define APP_VERSION "1.0"
+#define APP_VERSION "1.1"
 #define SRC_DIR "dist\IN-code"
 #define OUT_DIR "installer"
 
