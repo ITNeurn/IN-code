@@ -30,11 +30,16 @@ IN-code 是一款 Windows 桌面编程学习软件（Python + PyQt6 + C）。核
 
 ## 下载安装
 
-前往 [Releases](../../releases) 下载：
+**永久下载地址**（始终指向最新版本，不会随版本号变化）：
 
-| 文件 | 说明 |
+| 分卷 | 下载链接 |
 | --- | --- |
-| `IN-code-1.1-sfx.exe.7z.001 ~ .004` | 自解压安装包分卷（内含 DeepSeek R1 7B 模型，全部下载后解压第一个分卷即可） |
+| 第 1 卷 | https://github.com/ITNeurn/IN-code/releases/latest/download/IN-code.7z.001 |
+| 第 2 卷 | https://github.com/ITNeurn/IN-code/releases/latest/download/IN-code.7z.002 |
+| 第 3 卷 | https://github.com/ITNeurn/IN-code/releases/latest/download/IN-code.7z.003 |
+| 第 4 卷 | https://github.com/ITNeurn/IN-code/releases/latest/download/IN-code.7z.004 |
+
+下载全部 4 个分卷后，用 7-Zip 解压 `IN-code.7z.001` 即得到 `IN-code-1.1-sfx.exe` 自解压安装包，运行即安装（内含 DeepSeek R1 7B 模型）。
 
 > 安装包约 4.4 GB（内置 4.7 GB 本地模型），解压后约需 5 GB 磁盘空间。
 
