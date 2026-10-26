@@ -23,6 +23,7 @@ from core.ai_client import AIWorker, ChatWorker
 from core.compiler import RunWorker
 from core.library_installer import LibraryInstallWorker
 from core.exporter import export_source, export_exe
+from core.android_exporter import ApkBuildWorker, wsl_installed, install_wsl
 from .ai_mode import AIModePage
 from .traditional_mode import TraditionalModePage
 from .settings_dialog import SettingsDialog
@@ -98,7 +99,9 @@ class MainWindow(QMainWindow):
         self._run_worker: RunWorker | None = None
         self._lib_worker: LibraryInstallWorker | None = None
         self._chat_worker: ChatWorker | None = None
+        self._apk_worker: ApkBuildWorker | None = None
         self._animating = False   # 模式切换动画进行中标志（防连点）
+        self._lib_retry = 0       # AI 请求装库后自动重试翻译的轮数（防死循环）
 
         # ---------------- 页面
         self.ai_page = AIModePage()
@@ -176,6 +179,7 @@ class MainWindow(QMainWindow):
         em = QMenu(self)
         em.addAction("导出源码…", self._export_source)
         em.addAction("打包为 exe…", self._export_exe)
+        em.addAction("打包为 APK…", self._export_apk)
         self.btn_export.setMenu(em)
         bar.addWidget(self.btn_export)
 
@@ -397,6 +401,63 @@ class MainWindow(QMainWindow):
             lambda m: QMessageBox.critical(self, "打包失败", m))
         self._exe_worker.start()
 
+    def _export_apk(self):
+        """导出 Android APK（WSL2 + buildozer）；首次使用会引导安装 WSL2。"""
+        self._collect_project()
+        if self.project.language != "python":
+            QMessageBox.information(self, "提示", "只有 Python 项目支持打包为 APK")
+            return
+        code = self.project.generated_code
+        if not code.strip():
+            QMessageBox.information(self, "提示", "当前没有可导出的代码")
+            return
+
+        # 前置条件：WSL2（Windows 没有 Android 构建工具链）
+        if not wsl_installed():
+            ret = QMessageBox.question(
+                self, "需要安装 WSL2",
+                "打包 APK 需要 WSL2（Windows 的 Linux 子系统）。\n\n"
+                "安装将下载约 1~2 GB 的 Linux 发行版，可能需要重启电脑。\n"
+                "确认后会弹出管理员权限请求。\n\n现在开始安装吗？")
+            if ret != QMessageBox.StandardButton.Yes:
+                return
+            self.terminal_dock.show()
+            self.terminal.append_line("[APK] 正在启动 WSL2 安装…")
+            ok, msg = install_wsl()
+            self.terminal.append_line(f"[APK] {msg}")
+            if ok:
+                QMessageBox.information(
+                    self, "WSL2 安装已启动",
+                    "WSL2 安装已开始，可能需要重启电脑。\n"
+                    "重启并完成初始化后，回到此菜单再次点击「打包为 APK…」即可继续。")
+            else:
+                QMessageBox.critical(self, "WSL2 安装失败", msg)
+            return
+
+        # Android 界面必须用 Kivy，PyQt6 桌面代码打包后无法显示界面
+        if "kivy" not in code.lower():
+            ret = QMessageBox.question(
+                self, "Android 界面提示",
+                "Android 应用界面需要用 Kivy 编写，当前代码中未检测到 Kivy。\n"
+                "打包出的 APK 可能无法显示界面或启动后闪退。\n\n仍要继续打包吗？")
+            if ret != QMessageBox.StandardButton.Yes:
+                return
+
+        out_dir = QFileDialog.getExistingDirectory(self, "选择 APK 输出目录")
+        if not out_dir:
+            return
+
+        self.terminal_dock.show()
+        self.terminal.append_line("[APK] 开始构建（首次需下载 Android SDK，耗时较长）…")
+        self._apk_worker = ApkBuildWorker(code, out_dir, "incodeapp", self)
+        self._apk_worker.log.connect(self.terminal.append_line)
+        self._apk_worker.stage.connect(lambda s: self.terminal.append_line(f"[APK] {s}"))
+        self._apk_worker.done.connect(
+            lambda p: QMessageBox.information(self, "打包成功", f"APK 已生成：\n{p}"))
+        self._apk_worker.error.connect(
+            lambda m: QMessageBox.critical(self, "APK 打包失败", m))
+        self._apk_worker.start()
+
     # ================================================================ 运行（编译流程）
     def _run(self):
         """
@@ -427,15 +488,51 @@ class MainWindow(QMainWindow):
         if result.error:
             QMessageBox.critical(self, "调用失败", result.error)
             return
+        if result.packages:
+            # AI 通过 {UNX}…{UNY} 请求安装第三方库：自动安装后重试翻译
+            self._auto_install_and_retry(result.packages)
+            return
         if not result.ok:
-            # 理解故障模板页面
+            # 理解故障模板页面（{INX}…{INY} 协议）
             UnderstandFailureDialog(result.fail_reason, self).exec()
             return
+        self._lib_retry = 0
         # 写入分区2 + 同步传统编辑器，然后编译运行
         self.ai_page.set_code(result.code)
         self.trad_page.set_code(result.code)
         self.project.generated_code = result.code
         self._start_run(result.code)
+
+    def _auto_install_and_retry(self, packages: list[str]):
+        """AI 请求安装第三方库：自动安装后重新翻译（最多 3 轮，防死循环）。"""
+        if self._lib_retry >= 3:
+            self._lib_retry = 0
+            QMessageBox.warning(self, "库安装",
+                                "AI 连续多次要求安装库，已停止自动重试，请检查描述后手动安装。")
+            return
+        self._lib_retry += 1
+
+        names = "、".join(packages)
+        self.terminal_dock.show()
+        self.terminal.append_line(f"[库安装] AI 请求安装：{names}")
+        dlg = LibraryInstallDialog(self)
+        dlg.set_package(names)
+        dlg.show()
+
+        def _finished(all_ok: bool):
+            dlg.close()
+            if all_ok:
+                self.terminal.append_line("[库安装] 安装完成，正在重新翻译…")
+                self._run()
+            else:
+                self._lib_retry = 0
+                QMessageBox.critical(self, "库安装失败",
+                                     f"部分库安装失败（{names}），请检查网络或库名后重试")
+
+        self._lib_worker = LibraryInstallWorker(packages, self)
+        self._lib_worker.progress.connect(dlg.set_package)
+        self._lib_worker.finished_all.connect(_finished)
+        self._lib_worker.start()
 
     def _start_run(self, code: str):
         # 运行后自动弹出终端显示输出（两种模式都弹出）

@@ -8,36 +8,54 @@ AI 客户端模块
 
 AI 只作为"翻译器"：把用户梳理好的自然语言逻辑流程翻译成标准源代码。
 解析协议：
-  - 成功：仅输出代码本身（可带 ``` 代码块，客户端负责剥离）。
-  - 失败：以 [[理解故障]] 开头，后接无法理解的原因，供"理解故障"弹窗展示。
+  - 成功：直接输出代码本身（可带 ``` 代码块，客户端负责剥离）。
+  - 无法理解：{INX}print：（无法理解的内容）{INY} → 理解故障弹窗。
+  - 需要第三方库：{UNX}text：（库名称）{UNY} → 自动安装后重试翻译。
 所有网络请求都放在 QThread 工作线程中执行，不阻塞界面。
 """
 import re
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 
-# 理解故障标记：模型无法解析用户逻辑时以此开头回复
+# 理解故障标记（旧协议，保留兼容）
 FAILURE_MARK = "[[理解故障]]"
+
+# 新协议标记：{INX}…{INY} = 无法理解的内容；{UNX}…{UNY} = 需要安装的第三方库
+FAIL_OPEN, FAIL_CLOSE = "{INX}", "{INY}"
+LIB_OPEN, LIB_CLOSE = "{UNX}", "{UNY}"
+
+FAIL_RE = re.compile(r"\{INX\}(.*?)\{INY\}", re.S)
+LIB_RE = re.compile(r"\{UNX\}(.*?)\{UNY\}", re.S)
 
 # 系统提示词：约束模型只做"逻辑 → 代码"的翻译，不做自由发挥
 SYSTEM_PROMPT = """你是一个编程翻译器。用户会用自然语言给出完整的程序逻辑流程（步骤、条件、循环等），
 你的唯一任务是把这些逻辑忠实地翻译成 {lang} 标准源代码，不要添加用户没有描述的功能。
 
 规则：
-1. 只输出代码本身，不要解释，不要使用 Markdown 代码块标记。
-2. 如果用户的描述逻辑不完整、存在矛盾或无法理解，不要编造代码，
-   请只输出一行：{mark}无法理解的具体原因
-3. 代码必须可以直接编译/运行，包含必要的入口（如 main）。"""
+1. 在输出代码时要直接输出，不能有任何多余内容：不要解释、不要寒暄、不要使用 Markdown 代码块标记。
+2. 在遇到无法理解的内容片段时要输出函数：
+{fail_open}print：（无法理解的内容）{fail_close}
+3. 在遇到需要安装第三方库的时候输出函数：
+{lib_open}text：（库名称）{lib_close}
+4. 代码必须可以直接编译/运行，包含必要的入口（如 main）。"""
+
+
+def system_prompt(lang: str) -> str:
+    """生成系统提示词（把协议标记填入模板）。"""
+    return SYSTEM_PROMPT.format(lang=lang, fail_open=FAIL_OPEN, fail_close=FAIL_CLOSE,
+                                lib_open=LIB_OPEN, lib_close=LIB_CLOSE)
 
 
 class AIResult:
     """一次 AI 调用的结果。"""
 
-    def __init__(self, ok: bool, code: str = "", fail_reason: str = "", error: str = ""):
+    def __init__(self, ok: bool, code: str = "", fail_reason: str = "", error: str = "",
+                 packages: list[str] | None = None):
         self.ok = ok                    # 是否成功拿到代码
         self.code = code                # 生成的源代码
         self.fail_reason = fail_reason  # 理解故障原因（AI 主动返回）
         self.error = error              # 网络/接口错误（软件层面）
+        self.packages = packages or []  # AI 要求安装的第三方库（{UNX}…{UNY}）
 
 
 def strip_code_fence(text: str) -> str:
@@ -47,13 +65,47 @@ def strip_code_fence(text: str) -> str:
     return m.group(1).strip() if m else text
 
 
+def _clean_inner(s: str) -> str:
+    """清洗协议标记内的文本：去掉 print：/text： 前缀与外层括号。"""
+    s = s.strip()
+    s = re.sub(r"^\s*(print|text)\s*[：:]\s*", "", s, flags=re.I).strip()
+    if len(s) >= 2 and s[0] in "（(" and s[-1] in "）)":
+        s = s[1:-1].strip()
+    return s
+
+
+def _extract_packages(text: str) -> list[str]:
+    """从 {UNX}…{UNY} 中提取库名（支持逗号/顿号/空格分隔的多个库）。"""
+    out: list[str] = []
+    for m in LIB_RE.finditer(text):
+        for part in re.split(r"[，,、;；\s]+", _clean_inner(m.group(1))):
+            p = part.strip()
+            if p and re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", p) and p not in out:
+                out.append(p)
+    return out
+
+
 def parse_ai_reply(text: str, lang: str) -> AIResult:
-    """把模型原始回复解析成 AIResult（区分正常代码与理解故障）。"""
+    """把模型原始回复解析成 AIResult（理解故障 / 库请求 / 正常代码）。"""
     text = text.strip()
     # DeepSeek-R1 系列会先输出 <think>…</think> 推理过程，剥离掉
     text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+
+    # 1) 无法理解的内容：{INX}print：（原因）{INY}
+    m = FAIL_RE.search(text)
+    if m:
+        return AIResult(ok=False, fail_reason=_clean_inner(m.group(1)) or "描述不完整")
+    # 旧协议兼容：[[理解故障]]原因
     if text.startswith(FAILURE_MARK):
-        return AIResult(ok=False, fail_reason=text[len(FAILURE_MARK):].strip() or "描述不完整")
+        return AIResult(ok=False,
+                        fail_reason=text[len(FAILURE_MARK):].strip() or "描述不完整")
+
+    # 2) 需要安装第三方库：{UNX}text：（库名）{UNY}
+    packages = _extract_packages(text)
+    if packages:
+        return AIResult(ok=False, packages=packages)
+
+    # 3) 正常代码
     code = strip_code_fence(text)
     if not code:
         return AIResult(ok=False, fail_reason="模型未返回任何代码")
@@ -98,7 +150,7 @@ class AIWorker(QThread):
                 "model": self.settings.get("cloud_model", "deepseek-chat"),
                 "messages": [
                     {"role": "system",
-                     "content": SYSTEM_PROMPT.format(lang=self.language, mark=FAILURE_MARK)},
+                     "content": system_prompt(self.language)},
                     {"role": "user", "content": self.description},
                 ],
                 "temperature": 0.2,
@@ -133,7 +185,7 @@ class AIWorker(QThread):
                 "model": "embedded",
                 "messages": [
                     {"role": "system",
-                     "content": SYSTEM_PROMPT.format(lang=self.language, mark=FAILURE_MARK)},
+                     "content": system_prompt(self.language)},
                     {"role": "user", "content": self.description},
                 ],
                 "temperature": 0.2,
@@ -155,7 +207,7 @@ class AIWorker(QThread):
                     "model": model,
                     "messages": [
                         {"role": "system",
-                         "content": SYSTEM_PROMPT.format(lang=self.language, mark=FAILURE_MARK)},
+                         "content": system_prompt(self.language)},
                         {"role": "user", "content": self.description},
                     ],
                     "stream": False,
