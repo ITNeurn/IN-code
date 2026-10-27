@@ -32,6 +32,23 @@ class SimpleHighlighter(QSyntaxHighlighter):
     KEYWORDS["cpp"] = KEYWORDS["c"] + ["std", "cout", "cin", "endl", "namespace",
                                        "class", "public", "private", "new",
                                        "delete", "template", "vector", "string"]
+    KEYWORDS["java"] = ["public", "private", "protected", "class", "interface",
+                        "extends", "implements", "static", "final", "void",
+                        "int", "long", "double", "float", "char", "boolean",
+                        "byte", "short", "new", "return", "if", "else", "for",
+                        "while", "do", "switch", "case", "break", "continue",
+                        "try", "catch", "finally", "throw", "throws", "import",
+                        "package", "this", "super", "instanceof", "null", "true",
+                        "false", "String", "System", "main", "abstract", "enum"]
+    # H5：HTML 标签 + JS 常用关键字混排高亮
+    KEYWORDS["h5"] = ["html", "head", "body", "div", "span", "script", "style",
+                      "title", "meta", "link", "button", "input", "form", "table",
+                      "tr", "td", "ul", "li", "img", "video", "canvas", "header",
+                      "footer", "section", "function", "var", "let", "const",
+                      "return", "if", "else", "for", "while", "switch", "case",
+                      "break", "continue", "new", "class", "async", "await",
+                      "true", "false", "null", "undefined", "document", "window",
+                      "console", "addEventListener", "querySelector"]
 
     def __init__(self, document, language="python"):
         super().__init__(document)

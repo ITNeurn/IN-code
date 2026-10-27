@@ -170,7 +170,7 @@ class MainWindow(QMainWindow):
 
         # 编程语言切换
         self.lang_combo = QComboBox()
-        self.lang_combo.addItems(["Python", "C", "C++"])
+        self.lang_combo.addItems(["Python", "C", "C++", "Java", "H5"])
         self.lang_combo.currentIndexChanged.connect(self._on_lang_changed)
         bar.addWidget(self.lang_combo)
 
@@ -301,14 +301,14 @@ class MainWindow(QMainWindow):
 
     # ================================================================ 语言
     def _current_lang(self) -> str:
-        return ["python", "c", "cpp"][self.lang_combo.currentIndex()]
+        return ["python", "c", "cpp", "java", "h5"][self.lang_combo.currentIndex()]
 
     def _on_lang_changed(self, idx):
-        self._sync_language(["python", "c", "cpp"][idx])
+        self._sync_language(["python", "c", "cpp", "java", "h5"][idx])
 
     def _sync_language(self, lang: str):
         self.lang_combo.blockSignals(True)
-        self.lang_combo.setCurrentIndex(["python", "c", "cpp"].index(lang))
+        self.lang_combo.setCurrentIndex(["python", "c", "cpp", "java", "h5"].index(lang))
         self.lang_combo.blockSignals(False)
         self.ai_page.set_language(lang)
         self.trad_page.set_language(lang)

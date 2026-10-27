@@ -65,9 +65,19 @@ def build_sfx():
     print("[sfx] 自解压安装包 ->", out)
 
 
+def build_update():
+    """生成增量更新包 update-{version}.zip（只含 exe 与资源，不含模型）。"""
+    from core.updater import build_update_package
+    out = DIST.parent / f"update-{APP_VERSION}.zip"
+    build_update_package(DIST / "IN-code", out, APP_VERSION)
+    print("[update] 增量更新包 ->", out)
+
+
 if __name__ == "__main__":
     build_app()
     if "--installer" in sys.argv:
         build_installer()
     if "--sfx" in sys.argv:
         build_sfx()
+    if "--update" in sys.argv:
+        build_update()

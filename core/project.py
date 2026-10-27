@@ -27,8 +27,8 @@ from pathlib import Path
 PROJECT_EXT = ".incode"
 
 # 支持的语言与源码扩展名映射
-LANG_EXT = {"python": ".py", "c": ".c", "cpp": ".cpp"}
-LANG_NAMES = {"python": "Python", "c": "C", "cpp": "C++"}
+LANG_EXT = {"python": ".py", "c": ".c", "cpp": ".cpp", "java": ".java", "h5": ".html"}
+LANG_NAMES = {"python": "Python", "c": "C", "cpp": "C++", "java": "Java", "h5": "H5"}
 
 # 分区标记
 MARK_HEADER = "[IN-code Project v1]"

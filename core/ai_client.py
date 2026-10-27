@@ -39,11 +39,25 @@ SYSTEM_PROMPT = """你是一个编程翻译器。用户会用自然语言给出�
 {lib_open}text：（库名称）{lib_close}
 4. 代码必须可以直接编译/运行，包含必要的入口（如 main）。"""
 
+# 各语言的附加约束（追加在系统提示词末尾）
+LANG_RULES = {
+    "java": "\n5. Java 代码必须只包含一个 public class Main，"
+            "入口为 public static void main(String[] args)；不要输出 package 语句；"
+            "不要使用第三方库（{unx}…{uny} 协议仅对 Python 有效）。",
+    "h5": "\n5. H5 代码必须是一个完整独立的 HTML 文件：以 <!DOCTYPE html> 开头，"
+          "CSS 写在 <style> 中、JavaScript 写在 <script> 中，全部内联，"
+          "不引用任何外部文件，保存后可直接用浏览器打开运行。",
+    "python": "",
+    "c": "",
+    "cpp": "",
+}
+
 
 def system_prompt(lang: str) -> str:
-    """生成系统提示词（把协议标记填入模板）。"""
+    """生成系统提示词（把协议标记与语言专属约束填入模板）。"""
     return SYSTEM_PROMPT.format(lang=lang, fail_open=FAIL_OPEN, fail_close=FAIL_CLOSE,
-                                lib_open=LIB_OPEN, lib_close=LIB_CLOSE)
+                                lib_open=LIB_OPEN, lib_close=LIB_CLOSE) + \
+        LANG_RULES.get(lang, "").format(unx=LIB_OPEN, uny=LIB_CLOSE)
 
 
 class AIResult:

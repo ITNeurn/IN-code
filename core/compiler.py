@@ -64,12 +64,29 @@ def find_c_compiler(lang: str) -> str | None:
     return shutil.which(name)   # 系统 PATH（可能为 None）
 
 
+def find_java() -> tuple[str | None, str | None]:
+    """查找 JDK 的 javac 与 java：先 PATH，再 JAVA_HOME。"""
+    javac = shutil.which("javac")
+    java = shutil.which("java")
+    if javac and java:
+        return javac, java
+    home = os.environ.get("JAVA_HOME")
+    if home:
+        bin_dir = Path(home) / "bin"
+        javac = javac or (str(bin_dir / "javac.exe") if (bin_dir / "javac.exe").exists() else None)
+        java = java or (str(bin_dir / "java.exe") if (bin_dir / "java.exe").exists() else None)
+    return javac, java
+
+
 def environment_status() -> dict:
     """供界面显示环境状态。"""
+    javac, java = find_java()
     return {
         "venv_ready": (VENV_DIR / "Scripts" / "python.exe").exists(),
         "gcc": find_c_compiler("c"),
         "g++": find_c_compiler("cpp"),
+        "javac": javac,
+        "java": java,
     }
 
 
@@ -123,6 +140,10 @@ class RunWorker(QThread):
             BUILD_DIR.mkdir(parents=True, exist_ok=True)
             if self.language == "python":
                 self._run_python()
+            elif self.language == "java":
+                self._run_java()
+            elif self.language == "h5":
+                self._run_h5()
             else:
                 self._run_c()
         except PermissionError:
@@ -160,6 +181,35 @@ class RunWorker(QThread):
             return
         self.output.emit("编译成功，开始运行……\n")
         self._spawn([str(exe)], parse_lines=False)
+
+    # ------------------------------------------------------------ Java
+    def _run_java(self):
+        javac, java = find_java()
+        if not (javac and java):
+            self.failed.emit(
+                "未检测到 JDK（javac/java），请先安装 JDK 17+ 并加入 PATH 或配置 JAVA_HOME")
+            return
+        src = SRC_DIR / "Main.java"   # public class 名必须与文件名一致
+        src.write_text(self.code, encoding="utf-8")
+        proc = subprocess.run([javac, "-encoding", "UTF-8", "Main.java"],
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", cwd=str(SRC_DIR))
+        if proc.returncode != 0:
+            self.output.emit("编译失败：\n" + proc.stderr)
+            self.done.emit(proc.returncode)
+            return
+        self.output.emit("编译成功，开始运行……\n")
+        self._spawn([java, "-cp", str(SRC_DIR), "Main"], parse_lines=False)
+
+    # ------------------------------------------------------------ H5
+    def _run_h5(self):
+        import webbrowser
+        page = SRC_DIR / "index.html"
+        page.write_text(self.code, encoding="utf-8")
+        webbrowser.open(page.as_uri())
+        self.output.emit(f"已在默认浏览器中打开：{page}\n")
+        self.line_changed.emit(-1)
+        self.done.emit(0)
 
     # ------------------------------------------------------------ 子进程管理
     def _spawn(self, cmd: list[str], parse_lines: bool):
