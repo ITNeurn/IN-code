@@ -69,7 +69,7 @@ def build_update():
     """生成增量更新包 update-{version}.zip（只含 exe 与资源，不含模型）。"""
     from core.updater import build_update_package
     out = DIST.parent / f"update-{APP_VERSION}.zip"
-    build_update_package(DIST / "IN-code", out, APP_VERSION)
+    build_update_package(DIST, out, APP_VERSION)
     print("[update] 增量更新包 ->", out)
 
 
