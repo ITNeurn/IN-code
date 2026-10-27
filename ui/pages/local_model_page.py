@@ -30,12 +30,24 @@ class LocalModelPage(QWidget):
         lay = QVBoxLayout(self)
         lay.setSpacing(12)
 
-        # 当前选中本地模型
-        self.current_label = QLabel()
-        self._refresh_current()
-        lay.addWidget(self.current_label)
+        # 当前生效状态（哪个模式、哪个后端、哪个模型，一目了然）
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet("font-weight:bold; padding:6px;")
+        self._refresh_status()
+        lay.addWidget(self.status_label)
 
-        # 内嵌模型状态（软件打包内置的 DeepSeek R1 7B）
+        # 模式切换：云端 / 内嵌本地模型（点击立即生效）
+        row0 = QHBoxLayout()
+        b_cloud = QPushButton("使用云端 API")
+        b_cloud.clicked.connect(self._use_cloud)
+        b_embedded = QPushButton("使用内嵌模型（DeepSeek R1 7B）")
+        b_embedded.clicked.connect(self._use_embedded)
+        row0.addWidget(b_cloud)
+        row0.addWidget(b_embedded)
+        row0.addStretch(1)
+        lay.addLayout(row0)
+
+        # 内嵌模型文件/引擎就绪状态
         from core.local_engine import find_model, find_server
         gguf = find_model(self.settings)
         engine = find_server()
@@ -45,7 +57,7 @@ class LocalModelPage(QWidget):
         status.setStyleSheet("color:#1abc9c;" if (gguf and engine) else "color:#e74c3c;")
         lay.addWidget(status)
 
-        lay.addWidget(QLabel("更多本地 AI 模型（本机 Ollama 已安装）："))
+        lay.addWidget(QLabel("或选用本机 Ollama 已安装的模型（点击即生效）："))
         self.list = QListWidget()
         self.list.itemClicked.connect(self._select)
         lay.addWidget(self.list, 1)
@@ -60,10 +72,28 @@ class LocalModelPage(QWidget):
         lay.addLayout(row)
         self._reload()
 
-    def _refresh_current(self):
-        self.current_label.setText(
-            f"本地 AI 模型：{self.settings.get('local_model', 'deepseek-r1:7b')}"
-            "（当前选中，默认 Deepseek R1 7B）")
+    def _refresh_status(self):
+        mode = self.settings.get("model_mode", "cloud")
+        backend = self.settings.get("local_backend", "embedded")
+        model = self.settings.get("local_model", "deepseek-r1:7b")
+        if mode == "cloud":
+            text = "当前生效：云端 API"
+        elif backend == "embedded":
+            text = "当前生效：本地 · 内嵌模型（DeepSeek R1 7B）"
+        else:
+            text = f"当前生效：本地 · Ollama / {model}"
+        self.status_label.setText(text)
+
+    def _use_cloud(self):
+        self.settings.set("model_mode", "cloud")
+        self._refresh_status()
+        QMessageBox.information(self, "已生效", "AI 翻译将使用云端 API（设置 → API 接口管理中配置密钥）")
+
+    def _use_embedded(self):
+        self.settings.set("model_mode", "local")
+        self.settings.set("local_backend", "embedded")
+        self._refresh_status()
+        QMessageBox.information(self, "已生效", "AI 翻译将使用软件内嵌的 DeepSeek R1 7B 模型")
 
     def _reload(self):
         self.list.clear()
@@ -85,8 +115,12 @@ class LocalModelPage(QWidget):
         name = item.text()
         if name.startswith(("（", "无法", "加载")):
             return
+        # 三个键一起设置，确保点击后 AI 翻译立即走该模型
+        self.settings.set("model_mode", "local")
+        self.settings.set("local_backend", "ollama")
         self.settings.set("local_model", name)
-        self._refresh_current()
+        self._refresh_status()
+        QMessageBox.information(self, "已生效", f"AI 翻译将使用本地模型：{name}")
 
     def _pull(self):
         name, ok = QInputDialog.getText(self, "下载模型",

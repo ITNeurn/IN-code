@@ -267,6 +267,58 @@ check("APK依赖推导含第三方库",
 check("APK依赖推导含kivy", "kivy" in req)
 check("APK依赖排除标准库", "os" not in req.split(",") and "json" not in req.split(","))
 
+# ================================================================ 五、本地模型选择页（生效路径）
+from ui.pages import local_model_page as lmp
+
+lmp.QMessageBox.information = lambda *a, **kw: None
+
+
+class _FakeSettings:
+    """只读内存、不落盘的 settings（测试页逻辑用）。"""
+
+    def __init__(self):
+        self.d = {"model_mode": "cloud", "local_backend": "embedded",
+                  "local_model": "deepseek-r1:7b", "ollama_host": "http://localhost:11434",
+                  "model_storage": r"C:\temp\nonexistent"}
+
+    def get(self, k, default=None):
+        return self.d.get(k, default)
+
+    def set(self, k, v):
+        self.d[k] = v
+
+
+fs = _FakeSettings()
+page = lmp.LocalModelPage(fs)
+check("初始状态显示云端", "云端 API" in page.status_label.text())
+
+page._use_embedded()
+check("切内嵌模型", fs.d["model_mode"] == "local" and fs.d["local_backend"] == "embedded")
+check("内嵌状态文案", "内嵌模型" in page.status_label.text())
+
+
+class _Item:
+    def __init__(self, t):
+        self._t = t
+
+    def text(self):
+        return self._t
+
+
+page._select(_Item("deepseek-r1:14b"))
+check("选Ollama模型三键联动",
+      fs.d["model_mode"] == "local" and fs.d["local_backend"] == "ollama"
+      and fs.d["local_model"] == "deepseek-r1:14b")
+check("Ollama状态文案", "Ollama / deepseek-r1:14b" in page.status_label.text())
+
+# 占位文本不可选中
+before = dict(fs.d)
+page._select(_Item("（本机暂无模型，可点击“下载模型”）"))
+check("占位项点击无效", fs.d == before)
+
+page._use_cloud()
+check("切回云端", fs.d["model_mode"] == "cloud" and "云端 API" in page.status_label.text())
+
 ai.requests.post = orig_post
 
 print()
