@@ -26,7 +26,7 @@ IN-code 是一款 Windows 桌面编程学习软件（Python + PyQt6 + C）。核
     离线也能用；或连接本机 Ollama
 - **严格输出协议**：AI 只输出代码本身；听不懂时输出 `{INX}print：（原因）{INY}`
   并弹出澄清页，而不是瞎编代码；需要第三方库时输出 `{UNX}text：（库名）{UNY}`，
-  软件自动安装后重新翻译
+  软件只安装代码确实 import 且运行环境确实缺失的库，装完直接运行代码
 - **隔离运行环境**：所有代码在用户目录下的独立 venv 中运行，不污染系统
 - **超能模式**：六步向导解锁离线能力包——128 个 Python 第三方库分批
   多线程并行下载（6 路，先批量下 wheel 再本地离线安装），可选追加
@@ -46,7 +46,7 @@ IN-code 是一款 Windows 桌面编程学习软件（Python + PyQt6 + C）。核
 | 第 3 卷 | https://github.com/ITNeurn/IN-code/releases/latest/download/IN-code.7z.003 |
 | 第 4 卷 | https://github.com/ITNeurn/IN-code/releases/latest/download/IN-code.7z.004 |
 
-下载全部 4 个分卷后，用 7-Zip 解压 `IN-code.7z.001` 即得到 `IN-code-2.0-sfx.exe` 自解压安装包，运行即安装（内含 DeepSeek R1 7B 模型）。
+下载全部 4 个分卷后，用 7-Zip 解压 `IN-code.7z.001` 即得到自解压安装包 `IN-code-sfx.exe`，运行即安装（内含 DeepSeek R1 7B 模型）。
 
 > 安装包约 4.4 GB（内置 4.7 GB 本地模型），解压后约需 5 GB 磁盘空间。
 > 已安装旧版本的用户无需重下完整安装包：软件内 **设置 → 版本信息 → 检查更新**
