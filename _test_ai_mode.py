@@ -62,6 +62,10 @@ def run_worker_sync(worker):
     return results
 
 
+# 固定「隔离 venv 中没有任何第三方库」，避免测试结果受本机已装库影响
+ai._venv_has_module = lambda name: False
+
+
 # ================================================================ 一、解析层
 check("纯代码原样返回",
       ai.parse_ai_reply("print(1)", "python").code == "print(1)")
@@ -93,16 +97,48 @@ r = ai.parse_ai_reply("{INX}print：循环次数不明{INY}", "python")
 check("新协议无括号故障", (not r.ok) and r.fail_reason == "循环次数不明")
 
 r = ai.parse_ai_reply("{UNX}text：（numpy）{UNY}", "python")
-check("新协议库请求", (not r.ok) and r.packages == ["numpy"])
+check("只有库标记无代码时转为重试提示",
+      (not r.ok) and not r.packages and "numpy" in r.retry_hint)
 
-r = ai.parse_ai_reply("{UNX}text：（numpy、pandas，requests）{UNY}", "python")
-check("新协议多库解析", r.packages == ["numpy", "pandas", "requests"])
-
-r = ai.parse_ai_reply("{UNX}text：opencv-python{UNY}", "python")
-check("新协议无括号库名", r.packages == ["opencv-python"])
+check("库名解析：单库", ai._extract_packages("{UNX}text：（numpy）{UNY}") == ["numpy"])
+check("库名解析：多库",
+      ai._extract_packages("{UNX}text：（numpy、pandas，requests）{UNY}")
+      == ["numpy", "pandas", "requests"])
+check("库名解析：无括号",
+      ai._extract_packages("{UNX}text：opencv-python{UNY}") == ["opencv-python"])
 
 r = ai.parse_ai_reply("{INX}print：（无法理解）{INY}{UNX}text：（numpy）{UNY}", "python")
 check("故障优先于库请求", (not r.ok) and r.fail_reason == "无法理解" and not r.packages)
+
+# ---------------- 装库请求合理性校验（防模型幻觉，如 hello）
+r = ai.parse_ai_reply('print("你好世界")\n{UNX}text：（hello）{UNY}', "python")
+check("幻觉库请求被忽略且代码照常返回",
+      r.ok and r.code.strip() == 'print("你好世界")' and not r.packages)
+
+r = ai.parse_ai_reply("{UNX}text：（hello）{UNY}", "python")
+check("纯幻觉库请求不安装且要求重试",
+      (not r.ok) and not r.packages and bool(r.retry_hint))
+
+r = ai.parse_ai_reply("import requests\nprint(requests.__version__)\n"
+                      "{UNX}text：（requests）{UNY}", "python")
+check("代码确实 import 时保留库请求",
+      (not r.ok) and r.packages == ["requests"]
+      and "requests" in r.code and "{UNX}" not in r.code)
+
+r = ai.parse_ai_reply("import cv2\nprint(cv2.__version__)\n{UNX}text：（cv2）{UNY}",
+                      "python")
+check("导入名映射为 pip 包名", r.packages == ["opencv-python"])
+
+r = ai.parse_ai_reply("import json\nprint(json.dumps({}))\n"
+                      "{UNX}text：（json）{UNY}", "python")
+check("标准库请求被过滤", r.ok and not r.packages)
+
+r = ai.parse_ai_reply('print("hi")\n{UNX}text：（numpy）{UNY}', "python")
+check("代码未 import 的库不安装", r.ok and not r.packages)
+
+check("import 语句解析", ai._code_imports(
+    "import os, numpy as np\nfrom PIL import Image\nfrom a.b import c\n"
+    "import json\nx = 1") == {"os", "numpy", "pil", "a", "json"})
 
 # 系统提示词必须能正常渲染（新标记含花括号，不能被 format 吃掉）
 p = ai.system_prompt("python")
@@ -232,18 +268,49 @@ class _FakeLibWorker(QObject):
 mw_mod.LibraryInstallWorker = _FakeLibWorker
 mw_mod.QMessageBox.warning = lambda *a, **kw: None
 
-ai.requests.post = lambda *a, **kw: _FakeResp("{UNX}text：（numpy）{UNY}")
-win.ai_page.set_description("用 numpy 计算平均分")
+orig_run = win._run
+retried_hints = []
+
+
+def fake_run():
+    retried_hints.append(win._ai_hint)
+
+
+# AI 只给库标记不给代码（模型幻觉，如 hello）：不安装，带提示自动重试
+win._run = fake_run
+win._lib_retry = 0
+win._on_ai_done(ai.parse_ai_reply("{UNX}text：（numpy）{UNY}", "python"))
+check("只有库标记时不安装", started_pkgs == [])
+check("只有库标记时不直接运行", ran == [])
+check("只有库标记带提示重试",
+      len(retried_hints) == 1 and "numpy" in retried_hints[0])
+
+# 超过 3 轮仍未给出代码则停止
+win._lib_retry = 3
+retried_hints.clear()
+win._on_ai_done(ai.parse_ai_reply("{UNX}text：（hello）{UNY}", "python"))
+check("无代码重试超过3轮停止", retried_hints == [] and win._lib_retry == 0)
+
+# 本次已生成代码时：装库完成直接运行该代码，不再重新翻译
+win._run = orig_run
 ran.clear()
+retried.clear()
+started_pkgs.clear()
+ai.requests.post = lambda *a, **kw: _FakeResp(
+    "import requests\nprint(requests.get('https://x').status_code)\n"
+    "{UNX}text：（requests）{UNY}")
+win.ai_page.set_description("访问网址并显示状态码")
+win._lib_retry = 0
 win._run()
 win._ai_worker.wait(5000)
 app.processEvents()
-check("库请求触发自动安装", started_pkgs == [["numpy"]])
-check("库请求不直接运行", ran == [])
+check("带代码的库请求也触发安装", started_pkgs == [["requests"]])
+check("装库前不直接运行", ran == [])
 
-win._run = lambda: retried.append(True)
 fake_workers[-1].finished_all.emit(True)
-check("装库成功自动重试翻译", retried == [True])
+check("装库完成后直接运行已有代码",
+      retried == [] and len(ran) == 1 and "requests.get" in ran[0])
+check("直接运行的代码已去掉库标记", "{UNX}" not in ran[0])
 
 # 连续多轮要求装库时停止自动重试（防死循环）
 win._lib_retry = 3

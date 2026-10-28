@@ -102,6 +102,7 @@ class MainWindow(QMainWindow):
         self._apk_worker: ApkBuildWorker | None = None
         self._animating = False   # 模式切换动画进行中标志（防连点）
         self._lib_retry = 0       # AI 请求装库后自动重试翻译的轮数（防死循环）
+        self._ai_hint = ""        # 装库完成后追加给 AI 的补充提示
 
         # ---------------- 页面
         self.ai_page = AIModePage()
@@ -473,7 +474,9 @@ class MainWindow(QMainWindow):
             self._compile_dlg = CompileDialog(self)
             self._compile_dlg.set_stage("开始理解并编写、编译（AI解析中…）")
             self._compile_dlg.show()
-            self._ai_worker = AIWorker(self.settings, desc, self._current_lang(), self)
+            self._ai_worker = AIWorker(self.settings, desc, self._current_lang(), self,
+                                       extra_hint=self._ai_hint)
+            self._ai_hint = ""
             self._ai_worker.finished_ok.connect(self._on_ai_done)
             self._ai_worker.start()
         else:
@@ -488,23 +491,41 @@ class MainWindow(QMainWindow):
         if result.error:
             QMessageBox.critical(self, "调用失败", result.error)
             return
+        if result.retry_hint:
+            # 模型只给了库标记没给代码（常见幻觉）：不安装，带提示重新翻译
+            if self._lib_retry >= 3:
+                self._lib_retry = 0
+                QMessageBox.warning(
+                    self, "AI 未给出代码",
+                    "AI 只请求安装库、没有输出代码，已停止自动重试。\n"
+                    "请重新描述要实现的功能，或改用云端模型。")
+                return
+            self._lib_retry += 1
+            self._ai_hint = result.retry_hint
+            self.terminal_dock.show()
+            self.terminal.append_line("[AI] 未输出代码，带提示重新翻译…")
+            self._run()
+            return
         if result.packages:
-            # AI 通过 {UNX}…{UNY} 请求安装第三方库：自动安装后重试翻译
-            self._auto_install_and_retry(result.packages)
+            # AI 通过 {UNX}…{UNY} 请求安装第三方库：装完直接运行已生成的代码
+            self._auto_install_and_retry(result.packages, result.code)
             return
         if not result.ok:
             # 理解故障模板页面（{INX}…{INY} 协议）
             UnderstandFailureDialog(result.fail_reason, self).exec()
             return
         self._lib_retry = 0
-        # 写入分区2 + 同步传统编辑器，然后编译运行
-        self.ai_page.set_code(result.code)
-        self.trad_page.set_code(result.code)
-        self.project.generated_code = result.code
-        self._start_run(result.code)
+        self._apply_and_run(result.code)
 
-    def _auto_install_and_retry(self, packages: list[str]):
-        """AI 请求安装第三方库：自动安装后重新翻译（最多 3 轮，防死循环）。"""
+    def _apply_and_run(self, code: str):
+        """把代码写入 AI 分区2 + 同步传统编辑器，然后编译运行。"""
+        self.ai_page.set_code(code)
+        self.trad_page.set_code(code)
+        self.project.generated_code = code
+        self._start_run(code)
+
+    def _auto_install_and_retry(self, packages: list[str], code: str = ""):
+        """AI 请求安装第三方库：装完优先直接运行已有代码，否则重新翻译（最多 3 轮）。"""
         if self._lib_retry >= 3:
             self._lib_retry = 0
             QMessageBox.warning(self, "库安装",
@@ -521,13 +542,21 @@ class MainWindow(QMainWindow):
 
         def _finished(all_ok: bool):
             dlg.close()
-            if all_ok:
-                self.terminal.append_line("[库安装] 安装完成，正在重新翻译…")
-                self._run()
-            else:
+            if not all_ok:
                 self._lib_retry = 0
                 QMessageBox.critical(self, "库安装失败",
                                      f"部分库安装失败（{names}），请检查网络或库名后重试")
+                return
+            if code:
+                # 本次已经拿到可用代码：装完库直接运行，不再重新翻译
+                self._lib_retry = 0
+                self.terminal.append_line("[库安装] 安装完成，直接运行本次生成的代码")
+                self._apply_and_run(code)
+                return
+            self.terminal.append_line("[库安装] 安装完成，正在重新翻译…")
+            self._ai_hint = (f"注意：以下库已经安装完成，可以直接 import 使用：{names}。"
+                             "不要再为它们输出库安装标记，请直接输出完整可运行的代码。")
+            self._run()
 
         self._lib_worker = LibraryInstallWorker(packages, self)
         self._lib_worker.progress.connect(dlg.set_package)

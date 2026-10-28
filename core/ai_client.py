@@ -14,8 +14,11 @@ AI 只作为"翻译器"：把用户梳理好的自然语言逻辑流程翻译成
 所有网络请求都放在 QThread 工作线程中执行，不阻塞界面。
 """
 import re
+import sys
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
+
+from config.settings import VENV_DIR
 
 # 理解故障标记（旧协议，保留兼容）
 FAILURE_MARK = "[[理解故障]]"
@@ -35,8 +38,12 @@ SYSTEM_PROMPT = """你是一个编程翻译器。用户会用自然语言给出�
 1. 在输出代码时要直接输出，不能有任何多余内容：不要解释、不要寒暄、不要使用 Markdown 代码块标记。
 2. 在遇到无法理解的内容片段时要输出函数：
 {fail_open}print：（无法理解的内容）{fail_close}
-3. 在遇到需要安装第三方库的时候输出函数：
-{lib_open}text：（库名称）{lib_close}
+3. 只有当你的代码确实 import 了 Python 标准库以外的第三方模块、且该模块不属于内置能力时，
+才输出：
+{lib_open}text：（pip 包名称）{lib_close}
+   注意：print、input、len、range、sum、sorted 等内置函数，以及 json、os、sys、math、
+   random、time、re、datetime、collections、itertools、tkinter、csv、sqlite3、pathlib
+   等标准库都无需安装，严禁为它们输出该标记；一次只请求真正缺少的库，不确定时不要输出。
 4. 代码必须可以直接编译/运行，包含必要的入口（如 main）。"""
 
 # 各语言的附加约束（追加在系统提示词末尾）
@@ -62,14 +69,14 @@ def system_prompt(lang: str) -> str:
 
 class AIResult:
     """一次 AI 调用的结果。"""
-
     def __init__(self, ok: bool, code: str = "", fail_reason: str = "", error: str = "",
-                 packages: list[str] | None = None):
+                 packages: list[str] | None = None, retry_hint: str = ""):
         self.ok = ok                    # 是否成功拿到代码
         self.code = code                # 生成的源代码
         self.fail_reason = fail_reason  # 理解故障原因（AI 主动返回）
         self.error = error              # 网络/接口错误（软件层面）
         self.packages = packages or []  # AI 要求安装的第三方库（{UNX}…{UNY}）
+        self.retry_hint = retry_hint    # 非空表示需带着该提示自动重新翻译
 
 
 def strip_code_fence(text: str) -> str:
@@ -99,6 +106,80 @@ def _extract_packages(text: str) -> list[str]:
     return out
 
 
+# 常见「导入名 → pip 包名」映射：模型常写成 import 名，直接 pip 会装不上
+MODULE_TO_PIP = {
+    "cv2": "opencv-python", "pil": "Pillow", "sklearn": "scikit-learn",
+    "bs4": "beautifulsoup4", "yaml": "PyYAML", "serial": "pyserial",
+    "crypto": "pycryptodome", "dateutil": "python-dateutil", "fitz": "PyMuPDF",
+    "docx": "python-docx", "pptx": "python-pptx", "win32api": "pywin32",
+    "psycopg2": "psycopg2-binary", "telebot": "pyTelegramBotAPI",
+    "telegram": "python-telegram-bot", "opengl": "PyOpenGL", "usb": "pyusb",
+    "jwt": "PyJWT", "dotenv": "python-dotenv", "grpc": "grpcio",
+    "mpl_toolkits": "matplotlib", "google": "google-api-python-client",
+}
+_PIP_TO_MODULE = {v.replace("-", "_").lower(): k for k, v in MODULE_TO_PIP.items()}
+
+_IMPORT_RE = re.compile(
+    r"^\s*(?:from\s+([A-Za-z_][\w.]*)\s+import|import\s+([^\n#]+))", re.M)
+
+
+def _code_imports(code: str) -> set[str]:
+    """提取代码中 import 的顶层模块名（小写）。"""
+    mods: set[str] = set()
+    for m in _IMPORT_RE.finditer(code):
+        if m.group(1):
+            mods.add(m.group(1).split(".")[0].lower())
+        else:
+            for part in m.group(2).split(","):
+                name = part.strip().split(" as ")[0].strip().split(".")[0]
+                if re.fullmatch(r"[A-Za-z_]\w*", name):
+                    mods.add(name.lower())
+    return mods
+
+
+def _venv_has_module(name: str) -> bool:
+    """检查隔离 venv 的 site-packages 中是否已有该模块（避免误判为缺失）。"""
+    sp = VENV_DIR / "Lib" / "site-packages"
+    if not sp.is_dir():
+        return False
+    key = name.replace("-", "_").lower()
+    try:
+        for p in sp.iterdir():
+            n = p.name.lower()
+            if n == key or n.startswith(key + "-") or n.startswith(key + "."):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _filter_packages(packages: list[str], code: str) -> list[str]:
+    """过滤 AI 的装库请求：剔除幻觉、标准库、已安装、代码未真正 import 的模块。
+
+    只有「代码中确实 import 了、且当前隔离环境里确实没有」的模块才需要安装；
+    没有代码可交叉验证时一律不安装。
+    """
+    if not code:
+        return []
+    imports = _code_imports(code)
+    out: list[str] = []
+    for pkg in packages:
+        key = pkg.replace("-", "_").split(".")[0].lower()
+        if key in MODULE_TO_PIP:            # 模型写的是导入名（cv2 → opencv-python）
+            module, pip_name = key, MODULE_TO_PIP[key]
+        elif key in _PIP_TO_MODULE:         # 模型写的是 pip 名（opencv-python → cv2）
+            module, pip_name = _PIP_TO_MODULE[key], pkg
+        else:
+            module, pip_name = key, pkg
+        if module in sys.stdlib_module_names or _venv_has_module(module):
+            continue                       # 标准库 / 已装好，无需安装
+        if module not in imports:
+            continue                       # 代码根本没用到这个库（模型幻觉/无效请求）
+        if pip_name not in out:
+            out.append(pip_name)
+    return out
+
+
 def parse_ai_reply(text: str, lang: str) -> AIResult:
     """把模型原始回复解析成 AIResult（理解故障 / 库请求 / 正常代码）。"""
     text = text.strip()
@@ -114,13 +195,26 @@ def parse_ai_reply(text: str, lang: str) -> AIResult:
         return AIResult(ok=False,
                         fail_reason=text[len(FAILURE_MARK):].strip() or "描述不完整")
 
-    # 2) 需要安装第三方库：{UNX}text：（库名）{UNY}
-    packages = _extract_packages(text)
-    if packages:
-        return AIResult(ok=False, packages=packages)
+    # 2) 取出代码（先删掉库标记，避免标记混进源码）
+    raw_packages = _extract_packages(text)
+    code = strip_code_fence(LIB_RE.sub("", text))
 
-    # 3) 正常代码
-    code = strip_code_fence(text)
+    # 3) 需要安装第三方库：只保留代码真正 import 且环境里确实缺少的库
+    packages = _filter_packages(raw_packages, code) if raw_packages else []
+    if packages:
+        return AIResult(ok=False, code=code, packages=packages)
+    if raw_packages:
+        if code:
+            # 请求无效（幻觉/标准库/已安装/代码没用到）：直接用代码
+            return AIResult(ok=True, code=code)
+        # 只有库标记、没有代码：无法判断是否真需要，交给 pip 装可能装到幻觉库
+        bad = "、".join(raw_packages)
+        return AIResult(ok=False, retry_hint=(
+            f"你上一次只输出了库安装标记（{bad}），没有输出代码。"
+            "请直接输出完整可运行的代码；只有当代码确实 import 了第三方模块时，"
+            "才在代码之后附带库安装标记。标准库和内置函数绝不需要安装。"))
+
+    # 4) 正常代码
     if not code:
         return AIResult(ok=False, fail_reason="模型未返回任何代码")
     return AIResult(ok=True, code=code)
@@ -134,11 +228,20 @@ class AIWorker(QThread):
     """
     finished_ok = pyqtSignal(object)
 
-    def __init__(self, settings, description: str, language: str, parent=None):
+    def __init__(self, settings, description: str, language: str, parent=None,
+                 extra_hint: str = ""):
         super().__init__(parent)
         self.settings = settings
         self.description = description
         self.language = language
+        self.extra_hint = extra_hint
+
+    @property
+    def user_content(self) -> str:
+        """用户消息：描述 + 可选的补充提示（如"这些库已安装"）。"""
+        if self.extra_hint:
+            return f"{self.description}\n\n{self.extra_hint}"
+        return self.description
 
     # ------------------------------------------------------------ 主流程
     def run(self):
@@ -165,7 +268,7 @@ class AIWorker(QThread):
                 "messages": [
                     {"role": "system",
                      "content": system_prompt(self.language)},
-                    {"role": "user", "content": self.description},
+                    {"role": "user", "content": self.user_content},
                 ],
                 "temperature": 0.2,
                 "stream": False,
@@ -200,7 +303,7 @@ class AIWorker(QThread):
                 "messages": [
                     {"role": "system",
                      "content": system_prompt(self.language)},
-                    {"role": "user", "content": self.description},
+                    {"role": "user", "content": self.user_content},
                 ],
                 "temperature": 0.2,
                 "stream": False,
@@ -222,7 +325,7 @@ class AIWorker(QThread):
                     "messages": [
                         {"role": "system",
                          "content": system_prompt(self.language)},
-                        {"role": "user", "content": self.description},
+                        {"role": "user", "content": self.user_content},
                     ],
                     "stream": False,
                 },
