@@ -76,6 +76,23 @@ check("剥离 python 代码块", r.ok and r.code == "print(2)")
 r = ai.parse_ai_reply("```c\nint main(){return 0;}\n```", "c")
 check("剥离 c 代码块", r.ok and "main" in r.code)
 
+# 模型偶发的自定义围栏格式（本次用户遇到的 {/python} 泄漏问题）
+r = ai.parse_ai_reply("{python}\nprint('你好世界')\n{/python}", "python")
+check("剥离 {python}…{/python} 围栏",
+      r.ok and r.code == "print('你好世界')")
+
+r = ai.parse_ai_reply("[python]\nfor i in range(2):\n    print(i)\n[/python]", "python")
+check("剥离 [python]…[/python] 围栏", r.ok and "for i" in r.code and "[" not in r.code)
+
+r = ai.parse_ai_reply("~~~python\nprint(1)\n~~~", "python")
+check("剥离 ~~~ 围栏", r.ok and r.code == "print(1)")
+
+r = ai.parse_ai_reply("print('hi')\n{/python}", "python")
+check("剥离末尾残留的 {/python}", r.ok and r.code == "print('hi')")
+
+check("strip_code_fence 纯 {/python} 行被去掉",
+      ai.strip_code_fence("print(1)\n{/python}") == "print(1)")
+
 r = ai.parse_ai_reply("<think>用户在要循环…</think>\nfor i in range(3):\n    print(i)",
                       "python")
 check("剥离 think 推理段", r.ok and "<think>" not in r.code and "range" in r.code)

@@ -35,7 +35,9 @@ SYSTEM_PROMPT = """你是一个编程翻译器。用户会用自然语言给出�
 你的唯一任务是把这些逻辑忠实地翻译成 {lang} 标准源代码，不要添加用户没有描述的功能。
 
 规则：
-1. 在输出代码时要直接输出，不能有任何多余内容：不要解释、不要寒暄、不要使用 Markdown 代码块标记。
+1. 在输出代码时要直接输出，不能有任何多余内容：不要解释、不要寒暄；
+   严禁使用任何代码块包裹标记，包括 ```、~~~、{{python}}、[python]、<python> 等，
+   直接输出源代码本身。
 2. 在遇到无法理解的内容片段时要输出函数：
 {fail_open}print：（无法理解的内容）{fail_close}
 3. 只有当你的代码确实 import 了 Python 标准库以外的第三方模块、且该模块不属于内置能力时，
@@ -79,11 +81,37 @@ class AIResult:
         self.retry_hint = retry_hint    # 非空表示需带着该提示自动重新翻译
 
 
+# 代码块围栏匹配（支持 ```lang、~~~lang、{lang}、[lang]、<lang> 等多种模型输出风格）
+_OPEN_FENCE = re.compile(r"^(`{3,}|~{3,})\s*[\w.+-]*\s*$")
+_CLOSE_FENCE = re.compile(r"^(`{3,}|~{3,})\s*[\w.+-]*\s*$")
+_TAG_OPEN = re.compile(r"^\{[\w.]+\}$|^\[[\w.]+\]$|^<[\w.]+>$")
+_TAG_CLOSE = re.compile(r"^\{/[\w.]+\}$|^\[/[\w.]+\]$|^</[\w.]+>$")
+_TRAILING_TAG = re.compile(r"\s*(\{/[\w.]+\}|\[/[\w.]+\]|</[\w.]+>)\s*$")
+
+
 def strip_code_fence(text: str) -> str:
-    """剥离模型可能输出的 ``` 代码块包裹。"""
+    """剥离模型可能输出的各种代码块包裹，避免围栏标记混入源码。
+
+    支持 ``` ```、~~~ ~~~、{lang}…{/lang}、[lang]…[/lang]、<lang>…</lang>
+    等格式；对首尾残留的单独围栏行也会清理。
+    """
     text = text.strip()
+    # 优先从三反引号围栏中提取正文（含围栏前后有说明文字的情形）
     m = re.search(r"```(?:\w+)?\s*\n(.*?)```", text, re.S)
-    return m.group(1).strip() if m else text
+    if m:
+        text = m.group(1).strip()
+    # 行级清理：去掉首尾的围栏/标签行
+    lines = text.splitlines()
+    while lines and (_OPEN_FENCE.match(lines[0].strip())
+                     or _TAG_OPEN.match(lines[0].strip())):
+        lines.pop(0)
+    while lines and (_CLOSE_FENCE.match(lines[-1].strip())
+                     or _TAG_CLOSE.match(lines[-1].strip())):
+        lines.pop()
+    text = "\n".join(lines).strip()
+    # 兜底：去掉行末残留的关闭标签 {/xxx} [/xxx] </xxx>
+    text = _TRAILING_TAG.sub("", text).strip()
+    return text
 
 
 def _clean_inner(s: str) -> str:
