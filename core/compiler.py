@@ -158,7 +158,12 @@ class RunWorker(QThread):
         runner = SRC_DIR / "_runner.py"
         runner.write_text(_TRACE_RUNNER, encoding="utf-8")
         cmd = [str(venv_python()), "-u", str(runner), str(src)]
-        self._spawn(cmd, parse_lines=True)
+        # 强制子进程用 UTF-8 输出，避免中文 Windows 下默认 GBK 与
+        # 父进程 utf-8 解码不一致导致乱码
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        self._spawn(cmd, parse_lines=True, env=env)
 
     # ------------------------------------------------------------ C / C++
     def _run_c(self):
@@ -212,12 +217,15 @@ class RunWorker(QThread):
         self.done.emit(0)
 
     # ------------------------------------------------------------ 子进程管理
-    def _spawn(self, cmd: list[str], parse_lines: bool):
-        """启动子进程并实时转发输出；Python 模式下解析行标记。"""
+    def _spawn(self, cmd: list[str], parse_lines: bool, env: dict | None = None):
+        """启动子进程并实时转发输出；Python 模式下解析行标记。
+
+        env 为 None 时继承当前进程环境；Python 运行会传入强制 UTF-8 的环境变量。
+        """
         self._proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
-            cwd=str(SRC_DIR),
+            cwd=str(SRC_DIR), env=env,
         )
         assert self._proc.stdout is not None
         for raw in self._proc.stdout:
