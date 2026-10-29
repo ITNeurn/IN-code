@@ -46,14 +46,20 @@ SYSTEM_PROMPT = """你是一个编程翻译器。用户会用自然语言给出�
    注意：print、input、len、range、sum、sorted 等内置函数，以及 json、os、sys、math、
    random、time、re、datetime、collections、itertools、tkinter、csv、sqlite3、pathlib
    等标准库都无需安装，严禁为它们输出该标记；一次只请求真正缺少的库，不确定时不要输出。
-4. 代码必须可以直接编译/运行，包含必要的入口（如 main）。"""
+4. 自然语言中的动作/控制词必须翻译成对应的语法结构，不能当作字符串内容：
+   「输出/打印/显示」→ print；「输入/读入」→ input；「循环/重复」→ for/while；
+   「如果/若」→ if；「否则/不然」→ else；「返回」→ return；「定义函数/方法」→ def；
+   「列表/数组」→ list/[]；「字典」→ dict/{{}}。只有除去这些动作词之后的名词或数值
+   才是字面量内容。例如：「输出飞行」→ print("飞行")，而非 print("输出飞行")；
+   「输出你好世界」→ print("你好世界")；「输入姓名」→ input("姓名")。
+5. 代码必须可以直接编译/运行，包含必要的入口（如 main）。"""
 
 # 各语言的附加约束（追加在系统提示词末尾）
 LANG_RULES = {
-    "java": "\n5. Java 代码必须只包含一个 public class Main，"
+    "java": "\n6. Java 代码必须只包含一个 public class Main，"
             "入口为 public static void main(String[] args)；不要输出 package 语句；"
             "不要使用第三方库（{unx}…{uny} 协议仅对 Python 有效）。",
-    "h5": "\n5. H5 代码必须是一个完整独立的 HTML 文件：以 <!DOCTYPE html> 开头，"
+    "h5": "\n6. H5 代码必须是一个完整独立的 HTML 文件：以 <!DOCTYPE html> 开头，"
           "CSS 写在 <style> 中、JavaScript 写在 <script> 中，全部内联，"
           "不引用任何外部文件，保存后可直接用浏览器打开运行。",
     "python": "",
