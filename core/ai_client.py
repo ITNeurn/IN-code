@@ -63,8 +63,18 @@ LANG_RULES = {
           "CSS 写在 <style> 中、JavaScript 写在 <script> 中，全部内联，"
           "不引用任何外部文件，保存后可直接用浏览器打开运行。",
     "python": "",
-    "c": "",
-    "cpp": "",
+    "c": "\n6. 这是 C 语言代码：必须包含所需的标准头文件（如 #include <stdio.h>）"
+         "与 int main(void) 或 int main() 入口；输出用 printf、输入用 scanf；"
+         "只能使用 C 标准库，禁止使用 C++ 语法（如 cout、cin、class、vector）；"
+         "不要输出任何 {unx}…{uny} 安装标记（C 语言没有第三方库安装流程）。"
+         "自然语言动作词对应：输出→printf，输入→scanf，循环→for/while，"
+         "如果→if，定义函数→函数定义。",
+    "cpp": "\n6. 这是 C++ 代码：必须包含所需的标准头文件（如 #include <iostream>）"
+           "与 int main() 入口；输出用 std::cout，输入用 std::cin；"
+           "只使用 C++ 标准库（std 命名空间），不要依赖任何第三方库；"
+           "不要输出任何 {unx}…{uny} 安装标记（C++ 没有第三方库安装流程）。"
+           "自然语言动作词对应：输出→std::cout，输入→std::cin，"
+           "循环→for/while，如果→if，定义函数→函数定义。",
 }
 
 

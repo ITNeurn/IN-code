@@ -29,6 +29,9 @@ LINE_MARK = "@@CC_LINE:"      # 行高亮标记前缀
 BUILD_DIR = RUNTIME_DIR / "build"          # C/C++ 编译输出目录
 SRC_DIR = RUNTIME_DIR / "src"              # 临时代码存放目录
 
+# 随软件打包的资源根目录（onedir 打包后为 _internal）
+BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+
 
 # ---------------------------------------------------------------- 环境探测
 def venv_python() -> Path:
@@ -55,12 +58,19 @@ def venv_pip() -> list[str]:
     return [str(venv_python()), "-m", "pip"]
 
 
+def toolchain_bin_dirs() -> list[Path]:
+    """内置工具链 bin 目录候选列表（打包目录优先，其次用户数据目录）。"""
+    return [BUNDLE_DIR / "runtime" / "toolchain" / "bin",
+            RUNTIME_DIR / "toolchain" / "bin"]
+
+
 def find_c_compiler(lang: str) -> str | None:
     """查找 C/C++ 编译器：先找内置 toolchain，再找系统 PATH。"""
     name = "gcc" if lang == "c" else "g++"
-    builtin = RUNTIME_DIR / "toolchain" / "bin" / f"{name}.exe"
-    if builtin.exists():
-        return str(builtin)
+    for d in toolchain_bin_dirs():
+        exe = d / f"{name}.exe"
+        if exe.exists():
+            return str(exe)
     return shutil.which(name)   # 系统 PATH（可能为 None）
 
 
@@ -177,15 +187,31 @@ class RunWorker(QThread):
         src = SRC_DIR / f"main{ext}"
         src.write_text(self.code, encoding="utf-8")
         exe = BUILD_DIR / "main.exe"
+        std = "-std=c17" if self.language == "c" else "-std=c++17"
+        # gcc 在 Windows 上无法正确解析含中文的安装前缀，会找不到 stdio.h 等
+        # 原生头文件，这里显式把工具链的 include 目录传给编译器
+        inc_dir = Path(compiler).parent.parent / "include"
+        inc_flags = ["-idirafter", str(inc_dir)] if inc_dir.is_dir() else []
+        env = os.environ.copy()
+        # 强制英文诊断信息：中文 Windows 下 gcc 报错是 GBK，按 UTF-8 解码会乱码
+        env["LANG"] = "C"
+        env["LC_ALL"] = "C"
+        # 让编译产物能直接运行：静态链接 gcc/c++ 运行库，并把工具链 bin 加进 PATH
+        for d in toolchain_bin_dirs():
+            if d.exists():
+                env["PATH"] = str(d) + os.pathsep + env.get("PATH", "")
+                break
         # 先编译
-        proc = subprocess.run([compiler, str(src), "-o", str(exe), "-g"],
-                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+        proc = subprocess.run([compiler, str(src), "-o", str(exe), std, "-O0",
+                               "-static-libgcc", "-static-libstdc++", *inc_flags],
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", env=env)
         if proc.returncode != 0:
             self.output.emit("编译失败：\n" + proc.stderr)
             self.done.emit(proc.returncode)
             return
         self.output.emit("编译成功，开始运行……\n")
-        self._spawn([str(exe)], parse_lines=False)
+        self._spawn([str(exe)], parse_lines=False, env=env)
 
     # ------------------------------------------------------------ Java
     def _run_java(self):

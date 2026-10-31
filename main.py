@@ -49,7 +49,18 @@ def _setup_crash_logging():
 def main():
     _setup_crash_logging()
     from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt
     from ui.main_window import MainWindow
+
+    # WebEngine 必须在 QApplication 创建之前导入（否则抛
+    # ImportError: must be imported or AA_ShareOpenGLContexts must be set）
+    try:
+        import PyQt6.QtWebEngineWidgets  # noqa: F401
+        _webengine_ok = True
+    except ImportError:
+        _webengine_ok = False
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+
     app = QApplication(sys.argv)
     app.setApplicationName("IN-code")
     win = MainWindow()
@@ -57,7 +68,24 @@ def main():
     if os.path.exists(icon_path):
         from PyQt6.QtGui import QIcon
         app.setWindowIcon(QIcon(icon_path))
-    win.show()
+
+    # 启动动画：播放期间主窗口已创建但不显示，动画淡出后再亮相；
+    # WebEngine 不可用或自测模式下直接显示主窗口
+    # 打包后资源在 _MEIPASS（onedir 的 _internal 目录）下
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    html = os.path.join(base, "assets", "splash.html")
+    use_splash = _webengine_ok and ("--selftest-run" not in sys.argv) and os.path.exists(html)
+    if use_splash:
+        try:
+            from ui.splash import SplashScreen
+            splash = SplashScreen(html, on_finish=win.show)
+            splash.show()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            win.show()
+    else:
+        win.show()
 
     # 自测模式（排查打包版运行崩溃）：--selftest-run
     if "--selftest-run" in sys.argv:

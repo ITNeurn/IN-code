@@ -13,10 +13,17 @@ a = Analysis(
         (str(ROOT / "assets"), "assets"),
         # 内嵌推理引擎 llama.cpp（llama-server.exe 及依赖 dll）
         (r"E:\Doubao\CreativeCoder\runtime\llama", "runtime/llama"),
+        # 内置 C/C++ 工具链（MinGW-w64 gcc/g++，开箱即用）
+        (str(ROOT / "runtime" / "toolchain"), "runtime/toolchain"),
         # 内置 DeepSeek R1 7B GGUF 模型（约 4.7GB）
         (r"E:\Doubao\CreativeCoder\models", "models"),
     ],
-    hiddenimports=["PyQt6.QtMultimedia", "PyQt6.QtMultimediaWidgets"],
+    hiddenimports=[
+        "PyQt6.QtMultimedia", "PyQt6.QtMultimediaWidgets",
+        # 启动动画用 WebEngine 渲染 assets/splash.html
+        "PyQt6.QtWebEngineWidgets", "PyQt6.QtWebEngineCore",
+        "PyQt6.QtWebEngineQuick", "PyQt6.QtWebChannel", "PyQt6.QtPrintSupport",
+    ],
     hookspath=[],
     runtime_hooks=[],
     excludes=["torch", "tensorflow", "matplotlib", "numpy", "pandas"],
