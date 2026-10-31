@@ -39,15 +39,40 @@ def venv_python() -> Path:
     py = VENV_DIR / "Scripts" / "python.exe"
     if not py.exists():
         VENV_DIR.parent.mkdir(parents=True, exist_ok=True)
-        # 打包（PyInstaller）状态下 sys.executable 是软件自身 exe，
-        # 必须找系统 Python 来建 venv；找不到则报错提示
-        builder_python = sys.executable
+        # 打包状态下优先使用内置嵌入式 Python 创建 venv，不依赖系统 Python
         if getattr(sys, "frozen", False):
-            builder_python = shutil.which("python") or ""
-            if not builder_python:
-                raise RuntimeError("未检测到本机 Python，无法创建隔离运行环境")
-            subprocess.run([builder_python, "-m", "venv", str(VENV_DIR)],
-                           check=True, capture_output=True)
+            embedded_dir = BUNDLE_DIR / "runtime" / "python"
+            embedded_python = embedded_dir / "python.exe"
+            if embedded_python.exists():
+                # 嵌入式 Python 没有 venv 模块，直接复制到 venv 目录
+                VENV_DIR.mkdir(parents=True, exist_ok=True)
+                scripts_dir = VENV_DIR / "Scripts"
+                scripts_dir.mkdir(exist_ok=True)
+                # 复制 python.exe、python312.dll、python3.dll 和 python312.zip 到 Scripts 目录
+                shutil.copy2(embedded_python, scripts_dir / "python.exe")
+                shutil.copy2(embedded_dir / "python312.dll", scripts_dir / "python312.dll")
+                shutil.copy2(embedded_dir / "python3.dll", scripts_dir / "python3.dll")
+                shutil.copy2(embedded_dir / "python312.zip", scripts_dir / "python312.zip")
+                # 复制 Lib/site-packages（含 pip）到 venv
+                src_site = embedded_dir / "Lib" / "site-packages"
+                if src_site.exists():
+                    dst_site = VENV_DIR / "Lib" / "site-packages"
+                    if dst_site.exists():
+                        shutil.rmtree(dst_site)
+                    shutil.copytree(src_site, dst_site)
+                # 创建 pyvenv.cfg：home 指向 venv 自身，让 Python 在 Scripts 目录找 python312.zip
+                (VENV_DIR / "pyvenv.cfg").write_text(
+                    "home = " + str(scripts_dir) + "\n"
+                    "include-system-site-packages = false\n"
+                    "version = 3.12.10\n",
+                    encoding="utf-8"
+                )
+            else:
+                builder_python = shutil.which("python") or ""
+                if not builder_python:
+                    raise RuntimeError("未检测到本机 Python，且未找到内置嵌入式 Python")
+                subprocess.run([builder_python, "-m", "venv", str(VENV_DIR)],
+                               check=True, capture_output=True)
         else:
             venv.EnvBuilder(with_pip=True).create(VENV_DIR)
     return py

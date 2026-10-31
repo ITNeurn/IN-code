@@ -15,6 +15,8 @@ a = Analysis(
         (r"E:\Doubao\CreativeCoder\runtime\llama", "runtime/llama"),
         # 内置 C/C++ 工具链（MinGW-w64 gcc/g++，开箱即用）
         (str(ROOT / "runtime" / "toolchain"), "runtime/toolchain"),
+        # 内置 Python 3.12 嵌入式运行时（开箱即用，无需系统 Python）
+        (str(ROOT / "runtime" / "python"), "runtime/python"),
         # 内置 DeepSeek R1 7B GGUF 模型（约 4.7GB）
         (r"E:\Doubao\CreativeCoder\models", "models"),
     ],

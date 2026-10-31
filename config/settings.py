@@ -28,7 +28,7 @@ VENV_DIR = RUNTIME_DIR / "venv"                             # 内置 Python 虚�
 CONFIG_FILE = APP_DATA_DIR / "config.json"                  # 配置文件
 
 # 软件版本
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 APP_NAME = "IN-code"
 
 # 默认配置

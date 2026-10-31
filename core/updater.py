@@ -351,9 +351,9 @@ def build_update_package(dist_dir: Path, out: Path, version: str):
     """构建 update-{version}.zip：含 exe、资源与内置 C/C++ 工具链，不含模型。"""
     dist_dir = Path(dist_dir)
     include = [dist_dir / f"{APP_NAME}.exe"]
-    # assets 为界面资源；runtime/toolchain 为内置 gcc/g++，增量更新必须带上，
-    # 否则老版本用户升级后仍无法编译 C/C++
-    for sub in ("assets", "runtime/toolchain"):
+    # assets 为界面资源；runtime/toolchain 为内置 gcc/g++；runtime/python 为内置
+    # Python 运行时，增量更新都必须带上，否则老版本用户升级后仍无法运行对应语言
+    for sub in ("assets", "runtime/toolchain", "runtime/python"):
         base = dist_dir / "_internal" / sub
         if base.exists():
             include += [p for p in base.rglob("*") if p.is_file()]
