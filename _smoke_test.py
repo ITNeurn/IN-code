@@ -81,13 +81,15 @@ check("自然语言明文可见", "累加" in raw)
 check("生成代码分区", "[AI翻译后代码（隐藏）]" in raw)
 os.remove(tmp)
 
-# ---------------- 设置对话框六页面
+# ---------------- 设置对话框七页面
 dlg = SettingsDialog(win.settings, win)
-check("设置菜单6项", dlg.menu.count() == 6)
-dlg.menu.setCurrentRow(1)
-check("切换到API接口管理页", dlg.stack.currentIndex() == 1)
+check("设置菜单7项", dlg.menu.count() == 7)
+check("主题设置页", dlg.pages[1].switch.isChecked() == bool(
+    win.settings.get("immersive_glow", False)))
+dlg.menu.setCurrentRow(2)
+check("切换到API接口管理页", dlg.stack.currentIndex() == 2)
 dlg2 = SettingsDialog(win.settings, win, initial="API接口管理")
-check("AI设置直达API页", dlg2.stack.currentIndex() == 1)
+check("AI设置直达API页", dlg2.stack.currentIndex() == 2)
 
 # ---------------- 状态弹窗
 c = CompileDialog(win)

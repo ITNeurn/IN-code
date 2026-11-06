@@ -28,7 +28,7 @@ VENV_DIR = RUNTIME_DIR / "venv"                             # 内置 Python 虚�
 CONFIG_FILE = APP_DATA_DIR / "config.json"                  # 配置文件
 
 # 软件版本
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.2.0"
 APP_NAME = "IN-code"
 
 # 默认配置
@@ -52,6 +52,8 @@ DEFAULT_CONFIG = {
     "super_moe": False,                             # 是否安装 MoE 模型
     # 编程语言
     "language": "python",                           # python / c / cpp
+    # 主题：沉浸光感（窗口四周的呼吸极光）
+    "immersive_glow": False,
     # Github 跳转地址
     "github_url": "https://github.com",
 }

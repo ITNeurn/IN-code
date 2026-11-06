@@ -29,6 +29,7 @@ from .traditional_mode import TraditionalModePage
 from .settings_dialog import SettingsDialog
 from .widgets.terminal import TerminalPanel
 from .widgets.styles import GLOBAL_QSS
+from .widgets.glow import AmbientGlow
 from .dialogs.status_dialogs import (CompileDialog, LibraryInstallDialog,
                                      UnderstandFailureDialog)
 
@@ -137,6 +138,25 @@ class MainWindow(QMainWindow):
             lambda m: self.settings.set("local_model", m))
 
         self._sync_language(self.project.language)
+
+        # ---------------- 沉浸光感层（默认关闭，可在设置-主题设置中开启）
+        self._glow = AmbientGlow(self)
+        self._apply_immersive_glow(bool(self.settings.get("immersive_glow", False)))
+
+    # ================================================================ 沉浸光感
+    def _apply_immersive_glow(self, on: bool):
+        """开启/关闭窗口四周的呼吸极光。"""
+        if on:
+            self._glow.setGeometry(self.rect())
+            self._glow.start()
+        else:
+            self._glow.stop()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if getattr(self, "_glow", None) is not None:
+            self._glow.setGeometry(self.rect())
+            self._glow.raise_()
 
     # ================================================================ 导航栏
     def _nav_btn(self, text, handler, checkable=False) -> QPushButton:
@@ -343,10 +363,12 @@ class MainWindow(QMainWindow):
 
     # ================================================================ 设置入口
     def _open_settings(self):
-        SettingsDialog(self.settings, self).exec()
+        SettingsDialog(self.settings, self,
+                       on_theme_change=self._apply_immersive_glow).exec()
 
     def _open_ai_settings(self):
-        SettingsDialog(self.settings, self, initial="API接口管理").exec()
+        SettingsDialog(self.settings, self, initial="API接口管理",
+                       on_theme_change=self._apply_immersive_glow).exec()
 
     def _open_model_dialog(self):
         ModelDialog(self.settings, self).exec()

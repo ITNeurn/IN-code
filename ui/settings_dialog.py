@@ -10,17 +10,18 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QVBoxLayout, QListWidget,
                              QStackedWidget, QLabel, QWidget)
 
-from .pages import (StoragePage, ApiPage, LocalModelPage,
+from .pages import (StoragePage, ThemePage, ApiPage, LocalModelPage,
                     CloudApiPage, VersionPage, SuperModePage)
 
-MENU = ["默认存储位置", "API接口管理", "本地模型管理",
+MENU = ["默认存储位置", "主题设置", "API接口管理", "本地模型管理",
         "云端大模型API获取", "版本信息", "超能模式"]
 
 
 class SettingsDialog(QDialog):
     """设置主对话框：侧边菜单 + 页面堆栈。"""
 
-    def __init__(self, settings, parent=None, initial: str = None):
+    def __init__(self, settings, parent=None, initial: str = None,
+                 on_theme_change=None):
         super().__init__(parent)
         self.settings = settings
         self.setWindowTitle("设置")
@@ -48,6 +49,7 @@ class SettingsDialog(QDialog):
         self.stack = QStackedWidget()
         self.pages = [
             StoragePage(settings),
+            ThemePage(settings, on_change=on_theme_change),
             ApiPage(settings),
             LocalModelPage(settings),
             CloudApiPage(settings),

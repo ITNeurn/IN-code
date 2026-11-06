@@ -79,4 +79,25 @@ QProgressBar::chunk { background: #1abc9c; border-radius: 6px; }
 QMessageBox { background: #1e1f24; }
 QRadioButton { color: #e8eaed; }
 QDockWidget { color: #e8eaed; }
+
+/* ---------------- 华为风格设置卡片（主题设置页） */
+QFrame[hcard="true"] {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #171a1f, stop:1 #111317);
+    border: 1px solid #24272e; border-radius: 16px;
+}
+QLabel[h1="true"] {
+    font-size: 22px; font-weight: bold; color: #ffffff;
+}
+QLabel[h2="true"] {
+    font-size: 15px; font-weight: 600; color: #e8eaed;
+}
+QLabel[hint="true"] {
+    font-size: 12px; color: #8b949e;
+}
+QLabel[hicon="true"] {
+    font-size: 17px; color: #0b0c0e; border-radius: 11px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #1abc9c, stop:1 #23d1ae);
+}
 """
