@@ -6,9 +6,10 @@
 菜单项（自上而下）：
   默认存储位置 / API接口管理 / 本地模型管理 / 云端大模型API获取 / 版本信息 / 超能模式
 """
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtGui import QPainter, QColor, QPainterPath
 from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QVBoxLayout, QListWidget,
-                             QStackedWidget, QLabel, QWidget)
+                             QStackedWidget, QLabel, QWidget, QFrame)
 
 from .pages import (StoragePage, ThemePage, ApiPage, LocalModelPage,
                     CloudApiPage, VersionPage, SuperModePage)
@@ -18,7 +19,7 @@ MENU = ["默认存储位置", "主题设置", "API接口管理", "本地模型�
 
 
 class SettingsDialog(QDialog):
-    """设置主对话框：侧边菜单 + 页面堆栈。"""
+    """设置主对话框：侧边菜单 + 页面堆栈。磨砂半透明背景。"""
 
     def __init__(self, settings, parent=None, initial: str = None,
                  on_theme_change=None):
@@ -26,6 +27,8 @@ class SettingsDialog(QDialog):
         self.settings = settings
         self.setWindowTitle("设置")
         self.resize(860, 560)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setStyleSheet("QDialog{background:transparent;}")
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -64,3 +67,16 @@ class SettingsDialog(QDialog):
         # 支持外部指定初始页（如"AI设置"导航按钮直达 API 接口管理）
         idx = MENU.index(initial) if initial in MENU else 0
         self.menu.setCurrentRow(idx)
+
+    def paintEvent(self, event):
+        """磨砂圆角背景 + 青绿描边。"""
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 16, 16)
+        p.fillPath(path, QColor(16, 18, 22, 230))
+        p.setPen(QColor(126, 231, 135, 70))
+        p.drawPath(path)
+        p.end()
+

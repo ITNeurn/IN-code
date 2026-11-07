@@ -81,6 +81,21 @@ try:
 except IOError:
     check("篡改被检出", True)
 
+# 升级时跳过未变化的文件：增量包每次都带完整内置运行时，
+# 若不比对就会全量备份 + 全量覆盖，造成上百 MB 无谓磁盘 I/O
+install = tmp / "install"
+(install / "_internal" / "assets").mkdir(parents=True)
+(install / "IN-code.exe").write_bytes(b"old exe v1")                     # 内容不同 → 需替换
+(install / "_internal" / "assets" / "app.ico").write_bytes(b"fake icon")  # 与包内一致 → 跳过
+stage_files = updater.verify_package(pkg, tmp / "extract3")
+changed, skipped = updater.backup_and_stage(stage_files, install)
+check("变化文件计数", changed == 1)
+check("未变化文件计数", skipped == 1)
+check("旧exe已备份", (install / "IN-code.exe.bak").exists())
+check("未变化文件不备份", not (install / "_internal" / "assets" / "app.ico.bak").exists())
+check("跳过项已移出暂存区", not (tmp / "extract3" / "_internal" / "assets" / "app.ico").exists())
+check("待替换项保留在暂存区", (tmp / "extract3" / "IN-code.exe").exists())
+
 # ================================================================ 语言支持
 from core.project import LANG_EXT, LANG_NAMES
 check("LANG_EXT含java", LANG_EXT["java"] == ".java")

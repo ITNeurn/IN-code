@@ -27,6 +27,14 @@ QPushButton[primary="true"] {
 QPushButton[primary="true"]:hover { background: #23d1ae; }
 QPushButton[primary="true"]:disabled { background: #4a4d55; color: #888; }
 
+/* 普通按钮 */
+QPushButton {
+    background: #2c2e33; color: #e8eaed; border: none;
+    border-radius: 8px; padding: 6px 14px;
+}
+QPushButton:hover { background: #3a3d44; }
+QPushButton:disabled { background: #24262b; color: #6b7078; }
+
 /* 危险 / 关闭按钮 */
 QPushButton[danger="true"] {
     background: #e74c3c; color: #ffffff; border: none; border-radius: 9px;
@@ -38,6 +46,9 @@ QPushButton[danger="true"]:hover { background: #ff6152; }
 QFrame[panel="true"] {
     background: #1e1f24; border: 1px solid #2c2e33; border-radius: 12px;
 }
+
+/* 底部终端面板：容器透明，让光场延续到底部 */
+QWidget#terminalRoot { background: transparent; }
 
 /* 终端：近黑 + 绿色字 */
 QPlainTextEdit[terminal="true"] {
@@ -100,4 +111,46 @@ QLabel[hicon="true"] {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                                 stop:0 #1abc9c, stop:1 #23d1ae);
 }
+
+/* 页面根容器透明，让主窗口的光场背景透出（关闭光感时背景为纯黑，观感不变） */
+QWidget#pageRoot, QWidget#stage, QWidget#glassPanel, QWidget#themeRoot,
+QStackedWidget {
+    background: transparent;
+}
+
+/* 分段控件（光感强度：弱档 / 均衡档 / 强档） */
+QFrame[segbar="true"] {
+    background: #1a1d22; border: 1px solid #24272e; border-radius: 11px;
+}
+QPushButton[seg="true"] {
+    background: transparent; color: #8b949e; border: none;
+    border-radius: 8px; padding: 7px 0; font-size: 13px;
+}
+QPushButton[seg="true"]:hover { background: #24272e; color: #c9cdd4; }
+QPushButton[seg="true"]:checked {
+    background: #2b3038; color: #ffffff; font-weight: bold;
+}
+QPushButton[seg="true"]:disabled { color: #5a5f68; }
+"""
+
+# 沉浸光感开启时追加：控件让出实色底，改为半透明介质，光从背后透出
+GLOW_QSS = """
+QPushButton { background: rgba(52, 58, 66, 120); }
+QPushButton:hover { background: rgba(74, 82, 92, 160); }
+QPushButton[nav="true"] { background: rgba(52, 58, 66, 130); }
+QPushButton[nav="true"]:hover { background: rgba(74, 82, 92, 165); }
+QPlainTextEdit { background: rgba(8, 12, 15, 96); }
+QPlainTextEdit[editor="true"] { background: rgba(8, 12, 15, 96); }
+QPlainTextEdit[terminal="true"] { background: rgba(8, 10, 12, 140); }
+QLineEdit, QComboBox { background: rgba(10, 14, 18, 135); }
+QListWidget { background: rgba(10, 14, 18, 130); }
+QListWidget[sidebar="true"] { background: rgba(10, 14, 18, 200); }
+
+/* 主题设置卡片改为半透明介质，让页面自身的光场透出 */
+QFrame[hcard="true"] {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 rgba(23, 26, 31, 150),
+                                stop:1 rgba(17, 19, 23, 130));
+}
+QFrame[segbar="true"] { background: rgba(26, 29, 34, 160); }
 """

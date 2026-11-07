@@ -13,18 +13,22 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QProgressBar,
 
 
 class _CardDialog(QDialog):
-    """圆角卡片弹窗基类：无边框、模态、居中内容。"""
+    """圆角卡片弹窗基类：无边框、模态、居中内容。磨砂半透明风格。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setModal(True)
         self.setFixedSize(460, 260)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setStyleSheet("QDialog{background:transparent;}")
 
         card = QFrame(self)
         card.setProperty("panel", True)
-        card.setStyleSheet("QFrame{border-radius:14px;background:#26282e;"
-                           "border:1px solid #3a3d44;}")
+        card.setStyleSheet(
+            "QFrame{border-radius:14px;"
+            "background:rgba(30,32,38,210);"
+            "border:1px solid rgba(126,231,135,60);}")
         self.card_layout = QVBoxLayout(card)
         self.card_layout.setContentsMargins(28, 24, 28, 24)
         self.card_layout.setSpacing(14)

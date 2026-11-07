@@ -54,7 +54,9 @@ class VersionPage(QWidget):
     def _on_progress(self, done: int, total: int):
         if not self.bar.isVisible():
             self.bar.show()
-        self.bar.setMaximum(max(total, 1))
+        # 总大小下载前已知，只在变化时设置一次，避免每个进度事件都触发重排
+        if self.bar.maximum() != max(total, 1):
+            self.bar.setMaximum(max(total, 1))
         self.bar.setValue(done)
         self.stage_label.setText(
             f"正在下载更新包… {done / 1048576:.1f} / {total / 1048576:.1f} MB")

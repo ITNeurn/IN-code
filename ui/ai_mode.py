@@ -7,7 +7,9 @@ AI 模式默认界面
   - AI 生成代码保存在内部属性中（不在 AI 模式展示），
     切换到传统模式时同步进源码编辑器对照查看。
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPlainTextEdit, QFrame
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPlainTextEdit
+
+from .widgets.light_panel import LightPanel
 
 
 class AIModePage(QWidget):
@@ -15,10 +17,11 @@ class AIModePage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("pageRoot")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 8)
 
-        panel = QFrame(); panel.setProperty("panel", True)
+        panel = LightPanel()
         pl = QVBoxLayout(panel)
 
         # 唯一工作区：自然语言流程描述（无提示文字，占满）
@@ -26,6 +29,7 @@ class AIModePage(QWidget):
         self.desc_edit.setStyleSheet("border: none; font-size: 14px;")
         pl.addWidget(self.desc_edit)
         layout.addWidget(panel, 1)
+        self._panel = panel
 
         # AI 生成代码内部存放（AI 模式不展示，传统模式对照查看）
         self._code = ""
@@ -46,3 +50,7 @@ class AIModePage(QWidget):
 
     def set_language(self, language: str):
         self._language = language
+
+    def set_glow(self, enabled: bool, level: str = "balanced"):
+        """同步沉浸光感状态。"""
+        self._panel.set_glow(enabled, level)

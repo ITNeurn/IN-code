@@ -225,6 +225,29 @@ class IntroVideoDialog(QDialog):
         if HAS_VIDEO and status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.accept()
 
+    def _shutdown_player(self):
+        """关闭前显式停止播放并卸载媒体源。
+
+        播放中直接析构 QMediaPlayer/QAudioOutput，Windows 多媒体后端会
+        同步等待解码线程与音频设备退出，音频流阻塞时主线程死等（未响应）。
+        """
+        player = getattr(self, "_player", None)
+        if player is not None:
+            try:
+                player.stop()
+                player.setSource(QUrl())
+            except Exception:
+                pass
+            self._player = None
+
+    def accept(self):
+        self._shutdown_player()
+        super().accept()
+
+    def reject(self):
+        self._shutdown_player()
+        super().reject()
+
     def mousePressEvent(self, event):
         self.accept()    # 点击跳过动画
 
@@ -272,8 +295,10 @@ class SuperModeWizard:
             QMessageBox.critical(p, "磁盘空间不足", msg)
             return False
 
-        # 进入准备动画
-        IntroVideoDialog(p).exec()
+        # 进入准备动画（持有引用 + deleteLater，让播放器资源在事件循环空闲时回收）
+        intro = IntroVideoDialog(p)
+        intro.exec()
+        intro.deleteLater()
 
         # 写入状态并启动后台下载
         self.manager.activate(lib_dir, want_moe)

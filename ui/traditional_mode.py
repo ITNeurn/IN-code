@@ -9,11 +9,12 @@
   - 运行时代码行高亮：正在执行的代码行以淡黄底色高亮。
 """
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                             QLabel, QPlainTextEdit, QPushButton, QFrame,
+                             QLabel, QPlainTextEdit, QPushButton,
                              QComboBox, QMessageBox)
 from PyQt6.QtCore import pyqtSignal
 
 from .widgets.code_editor import CodeEditor
+from .widgets.light_panel import LightPanel
 
 
 class TraditionalModePage(QWidget):
@@ -26,12 +27,13 @@ class TraditionalModePage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("pageRoot")
         root = QHBoxLayout(self)
         root.setContentsMargins(8, 4, 8, 8)
         root.setSpacing(8)
 
         # ---------------- 左侧：编辑器（终端由主窗口底部停靠面板统一提供）
-        editor_frame = QFrame(); editor_frame.setProperty("panel", True)
+        editor_frame = LightPanel()
         ef = QVBoxLayout(editor_frame)
         title = QLabel("源代码编辑器（可编辑）")
         title.setStyleSheet("font-weight: bold; color: #1abc9c;")
@@ -41,7 +43,7 @@ class TraditionalModePage(QWidget):
         root.addWidget(editor_frame, 1)
 
         # ---------------- 右侧：AI 功能面板
-        panel = QFrame(); panel.setProperty("panel", True)
+        panel = LightPanel()
         panel.setFixedWidth(260)
         pl = QVBoxLayout(panel)
 
@@ -70,6 +72,8 @@ class TraditionalModePage(QWidget):
         pl.addStretch(1)
 
         root.addWidget(panel)
+        self._editor_panel = editor_frame
+        self._ai_panel = panel
 
         # 信号连接
         self.btn_ask.clicked.connect(self._on_ask)
@@ -100,6 +104,11 @@ class TraditionalModePage(QWidget):
 
     def set_language(self, language: str):
         self.code_edit.set_language(language)
+
+    def set_glow(self, enabled: bool, level: str = "balanced"):
+        """同步沉浸光感状态。"""
+        self._editor_panel.set_glow(enabled, level)
+        self._ai_panel.set_glow(enabled, level)
 
     def highlight_line(self, line: int):
         self.code_edit.highlight_exec_line(line)

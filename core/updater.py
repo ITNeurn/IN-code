@@ -288,13 +288,33 @@ class UpdateWorker(QThread):
             staging = APP_DATA_DIR / "update_staging"
             pkg = staging / "update.zip"
             self.stage.emit("正在下载更新包…")
-            dl = Downloader(asset["url"], pkg,
-                            on_progress=lambda d, t: self.progress.emit(d, t))
+            # 进度按 10Hz 节流：4 个下载线程每 64KB 回调一次，高速网络下
+            # 每秒会向界面投递上百个重绘事件，是更新时界面发卡的直接原因
+            last_emit = [0.0]
+            emit_lock = threading.Lock()
+
+            def _progress(done: int, total: int):
+                now = time.monotonic()
+                with emit_lock:
+                    if done < total and now - last_emit[0] < 0.1:
+                        return
+                    last_emit[0] = now
+                self.progress.emit(done, total)
+
+            dl = Downloader(asset["url"], pkg, on_progress=_progress)
             dl.start()
 
             self.stage.emit("正在校验更新包…")
             files = verify_package(pkg, staging / "files")
-            backup_and_stage(files, Path(sys.executable).parent)
+
+            self.stage.emit("正在比对本地文件…")
+            changed, skipped = backup_and_stage(files, Path(sys.executable).parent)
+            if changed == 0:
+                self.failed.emit("更新包内容与本地文件一致，无需更新")
+                return
+            if skipped:
+                self.stage.emit(
+                    f"更新就绪：替换 {changed} 个文件，跳过 {skipped} 个未变化文件")
             self.ready.emit(staging)
         except Exception as e:
             self.failed.emit(str(e))
@@ -318,12 +338,32 @@ def verify_package(pkg: Path, extract_to: Path) -> dict[str, Path]:
     return out
 
 
-def backup_and_stage(files: dict[str, Path], install_dir: Path):
-    """把将被覆盖的旧文件备份为 .bak（回滚用）。"""
-    for rel in files:
+def backup_and_stage(files: dict[str, Path], install_dir: Path) -> tuple[int, int]:
+    """备份将被覆盖的旧文件，并把未变化的文件移出暂存区。
+
+    与本地内容完全一致的条目直接从暂存目录删除，这样后续 xcopy 只搬运
+    真正变化的文件。增量包每次都带完整的内置运行时（toolchain 约 455MB、
+    5000 多个文件），若不比对就全部备份 + 全量覆盖，一次升级会产生近 2GB
+    随机 I/O，整机磁盘被打满，界面就会明显发卡。
+
+    返回 (需替换的文件数, 跳过的文件数)。
+    """
+    changed = skipped = 0
+    for rel, new in files.items():
         old = install_dir / rel
         if old.exists():
+            try:
+                same = (old.stat().st_size == new.stat().st_size
+                        and _sha256(old) == _sha256(new))
+            except OSError:
+                same = False
+            if same:
+                new.unlink(missing_ok=True)
+                skipped += 1
+                continue
             shutil.copy2(old, old.with_suffix(old.suffix + ".bak"))
+        changed += 1
+    return changed, skipped
 
 
 def apply_and_restart(staging: Path):

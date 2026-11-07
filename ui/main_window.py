@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                              QPushButton, QComboBox, QStackedWidget, QMenu,
                              QFileDialog, QMessageBox, QInputDialog, QDialog,
-                             QDockWidget, QLabel, QLineEdit, QRadioButton,
+                             QLabel, QLineEdit, QRadioButton,
                              QDialogButtonBox, QFormLayout)
 
 from config.settings import Settings, APP_NAME, APP_VERSION
@@ -28,8 +28,9 @@ from .ai_mode import AIModePage
 from .traditional_mode import TraditionalModePage
 from .settings_dialog import SettingsDialog
 from .widgets.terminal import TerminalPanel
-from .widgets.styles import GLOBAL_QSS
-from .widgets.glow import AmbientGlow
+from .widgets.styles import GLOBAL_QSS, GLOW_QSS
+from .widgets.light_stage import LightStage
+from .widgets.particle_transition import ParticleTransition
 from .dialogs.status_dialogs import (CompileDialog, LibraryInstallDialog,
                                      UnderstandFailureDialog)
 
@@ -43,6 +44,8 @@ class ModelDialog(QDialog):
         self.settings = settings
         self.setWindowTitle("模型管理")
         self.resize(480, 260)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setStyleSheet("QDialog{background:transparent;}")
 
         lay = QVBoxLayout(self)
         form = QFormLayout()
@@ -83,6 +86,19 @@ class ModelDialog(QDialog):
         s.set("local_model", self.edit_local.text().strip())
         self.accept()
 
+    def paintEvent(self, event):
+        from PyQt6.QtGui import QPainter, QColor, QPainterPath
+        from PyQt6.QtCore import QRectF
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 14, 14)
+        p.fillPath(path, QColor(20, 22, 26, 235))
+        p.setPen(QColor(126, 231, 135, 60))
+        p.drawPath(path)
+        p.end()
+
 
 # ================================================================ 主窗口
 class MainWindow(QMainWindow):
@@ -111,25 +127,25 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.stack.addWidget(self.ai_page)
         self.stack.addWidget(self.trad_page)
+        # 粒子转场层：覆盖在页面栈上，模式切换时做消散/拼接
+        self._transition = ParticleTransition(self.stack)
 
-        # ---------------- 中央区域 = 导航栏 + 页面栈
-        central = QWidget()
-        cl = QVBoxLayout(central)
+        # ---------------- 中央区域 = 光场背景 + 导航栏 + 页面栈
+        self.stage = LightStage()
+        cl = QVBoxLayout(self.stage)
         cl.setContentsMargins(8, 6, 8, 4)
         cl.setSpacing(4)
         cl.addLayout(self._build_navbar())
         cl.addWidget(self.stack, 1)
-        self.setCentralWidget(central)
 
-        # ---------------- 底部终端停靠面板（仅传统模式默认显示，AI 模式隐藏）
+        # ---------------- 底部终端面板（位于光场画布内，背景光可延续到底部）
         self.terminal = TerminalPanel()
-        dock = QDockWidget("终端", self)
-        dock.setObjectName("terminal_dock")
-        dock.setWidget(self.terminal)
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
-        self.terminal_dock = dock
-        dock.hide()   # 默认处于 AI 模式：不显示终端
+        self.terminal.setFixedHeight(170)
+        self.terminal.setVisible(False)   # 默认处于 AI 模式：不显示终端
+        cl.addWidget(self.terminal)
+        self.terminal_dock = self.terminal   # 兼容旧调用：show/hide/isVisible
+
+        self.setCentralWidget(self.stage)
 
         # ---------------- 页面信号
         self.trad_page.ask_ai.connect(self._on_ask_ai)
@@ -139,24 +155,19 @@ class MainWindow(QMainWindow):
 
         self._sync_language(self.project.language)
 
-        # ---------------- 沉浸光感层（默认关闭，可在设置-主题设置中开启）
-        self._glow = AmbientGlow(self)
-        self._apply_immersive_glow(bool(self.settings.get("immersive_glow", False)))
+        # ---------------- 沉浸光感（默认关闭，可在设置-主题设置中开启）
+        self._apply_immersive_glow(
+            bool(self.settings.get("immersive_glow", False)),
+            self.settings.get("immersive_glow_level", "balanced"))
 
     # ================================================================ 沉浸光感
-    def _apply_immersive_glow(self, on: bool):
-        """开启/关闭窗口四周的呼吸极光。"""
-        if on:
-            self._glow.setGeometry(self.rect())
-            self._glow.start()
-        else:
-            self._glow.stop()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if getattr(self, "_glow", None) is not None:
-            self._glow.setGeometry(self.rect())
-            self._glow.raise_()
+    def _apply_immersive_glow(self, on: bool, level: str | None = None):
+        """开启/关闭沉浸光感，并同步背景光场、玻璃面板与控件透明度。"""
+        level = level or self.settings.get("immersive_glow_level", "balanced")
+        self.stage.set_effect(on, level)
+        self.ai_page.set_glow(on, level)
+        self.trad_page.set_glow(on, level)
+        self.setStyleSheet(GLOBAL_QSS + (GLOW_QSS if on else ""))
 
     # ================================================================ 导航栏
     def _nav_btn(self, text, handler, checkable=False) -> QPushButton:
@@ -220,32 +231,25 @@ class MainWindow(QMainWindow):
 
     # ================================================================ 模式切换
     def _toggle_mode(self):
-        """AI 模式与传统模式一键互相切换，带淡入淡出过渡动画，代码双向同步。"""
+        """AI 模式 <-> 传统模式：粒子消散旧页 → 切换 → 粒子拼接新页。"""
         if self._animating:
             return
         going_to_trad = self.stack.currentWidget() is self.ai_page
         old_page, new_page = ((self.ai_page, self.trad_page) if going_to_trad
                               else (self.trad_page, self.ai_page))
-        # 代码双向同步
         new_page.set_code(old_page.code())
 
         self._animating = True
         self.btn_mode.setEnabled(False)
 
-        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
-        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        from PyQt6.QtWidgets import QApplication
 
-        # 第一阶段：当前页淡出
-        eff_out = QGraphicsOpacityEffect(old_page)
-        old_page.setGraphicsEffect(eff_out)
-        self._fade_out = QPropertyAnimation(eff_out, b"opacity", self)
-        self._fade_out.setDuration(180)
-        self._fade_out.setStartValue(1.0)
-        self._fade_out.setEndValue(0.0)
-        self._fade_out.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        # 1) 快照旧页 → 粒子向外消散
+        old_pix = old_page.grab()
+        old_page.hide()              # 隐藏旧页，粒子飞散后露出光场背景
 
-        def _switch():
-            old_page.setGraphicsEffect(None)     # 摘除效果，避免残留
+        def _after_dissolve():
+            old_page.show()          # 恢复旧页可见性
             self.stack.setCurrentWidget(new_page)
             if going_to_trad:
                 self.btn_mode.setText("进入AI模式")
@@ -253,24 +257,15 @@ class MainWindow(QMainWindow):
             else:
                 self.btn_mode.setText("退出AI模式")
                 self.terminal_dock.hide()
-            # 第二阶段：新页淡入
-            eff_in = QGraphicsOpacityEffect(new_page)
-            new_page.setGraphicsEffect(eff_in)
-            self._fade_in = QPropertyAnimation(eff_in, b"opacity", self)
-            self._fade_in.setDuration(220)
-            self._fade_in.setStartValue(0.0)
-            self._fade_in.setEndValue(1.0)
-            self._fade_in.setEasingCurve(QEasingCurve.Type.InOutQuad)
-            self._fade_in.finished.connect(self._anim_done)
-            self._fade_in.start()
+            QApplication.processEvents()
+            new_pix = new_page.grab()
+            # 2) 新页粒子从四周汇聚拼接
+            self._transition.assemble(new_pix, self._anim_done)
 
-        self._fade_out.finished.connect(_switch)
-        self._fade_out.start()
+        self._transition.dissolve(old_pix, _after_dissolve)
 
     def _anim_done(self):
-        """动画结束：清理特效、恢复按钮。"""
-        for page in (self.ai_page, self.trad_page):
-            page.setGraphicsEffect(None)
+        """转场结束：清理并恢复按钮。"""
         self._animating = False
         self.btn_mode.setEnabled(True)
 
